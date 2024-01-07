@@ -347,15 +347,21 @@ void resizePrimitiveTypeVectors(
   VELOX_DCHECK(
       vector->type()->isPrimitiveType(), "Only used for primitive types.");
   auto currentSize = vector->size();
+
+  // 通过BaseVector::ensureWritable可以知道，需要对vector进行复制时，
+  // 会保留extraRows中false对应的行（即extraRows中true对应的行，认为
+  // 会被overriden，无需进行复制）。
   LocalSelectivityVector extraRows(context, targetSize);
   extraRows->setValidRange(0, currentSize, false);
   extraRows->setValidRange(currentSize, targetSize, true);
   extraRows->updateBounds();
+
   BaseVector::ensureWritable(
       *extraRows, vector->type(), context.pool(), vector);
 }
 
 // static
+// 参考BaseVector.cpp中有关BaseVector::addNulls说明。
 void EvalCtx::addNulls(
     const SelectivityVector& rows,
     const uint64_t* rawNulls,
@@ -387,8 +393,10 @@ void EvalCtx::addNulls(
   if (!result.unique() || !result->isNullsWritable()) {
     if (result->type()->isPrimitiveType()) {
       if (currentSize < targetSize) {
+        // 对result vector进行扩容且复制已有的rows（可能创建新的vector）
         resizePrimitiveTypeVectors(result, targetSize, context);
       } else {
+        // 对result vector进行全量复制（可能创建新的vector）
         BaseVector::ensureWritable(
             SelectivityVector::empty(), type, context.pool(), result);
       }

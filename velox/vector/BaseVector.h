@@ -360,6 +360,7 @@ class BaseVector {
   /// accessed by valueAt after casting the vector to a type()
   /// dependent instantiation of SimpleVector<T>.
   virtual bool isScalar() const {
+    // TODO 通过type_信息不能判读是不是scala类型？
     return false;
   }
 

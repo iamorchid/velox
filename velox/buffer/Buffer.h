@@ -108,6 +108,8 @@ class Buffer {
     return MutableRange<T>(asMutable<T>(), 0, size() / sizeof(T));
   }
 
+  // size_表示当前Buffer已经使用了多少字节, 而capacity_表示Buffer创建时分配了
+  // 多少个字节（capacity_ >= size_).
   size_t size() const {
     return size_;
   }
