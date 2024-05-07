@@ -155,6 +155,7 @@ bool equalKeys(
 } // namespace
 
 void GroupingSet::addInput(const RowVectorPtr& input, bool mayPushdown) {
+  // isGlobal_为true, 说明grouping keys为空
   if (isGlobal_) {
     addGlobalAggregationInput(input, mayPushdown);
     return;

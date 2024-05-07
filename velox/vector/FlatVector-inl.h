@@ -285,7 +285,7 @@ void FlatVector<T>::copyValuesAndNulls(
   }
 }
 
-// [star]
+// [star] FlatVector<T>::copyRanges
 template <typename T>
 void FlatVector<T>::copyRanges(
     const BaseVector* source,

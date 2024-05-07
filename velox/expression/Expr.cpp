@@ -225,6 +225,7 @@ void Expr::computeDistinctFields() {
   }
 }
 
+// [star] Expr::computeMetadata()
 void Expr::computeMetadata() {
   if (metaDataComputed_) {
     return;
@@ -280,6 +281,11 @@ void Expr::computeMetadata() {
         }
       }
 
+      // 
+      // 这里的思路是: 只要保证nullPropagating是nonNullPropagating的超级, 对于任意一个存
+      // 在null的field, 我们都会至少有一个对应的input expr满足propagatesNulls. 当前expr
+      // 如果依赖多个inputs, 只要存在一个input为null, 当前expr就会为null.
+      //
       // propagatesNulls_ is true if nonNullPropagating is subset of
       // nullPropagating.
       propagatesNulls_ = true;
@@ -1152,7 +1158,7 @@ bool Expr::removeSureNulls(
     }
   }
 
-  // result不为nullptr，说明存在某些行被职位为null。另外，result被
+  // result不为nullptr，说明存在某些行被置为null。另外，result被
   // 封装在nullHolder中，调用方通过nullHolder.get()获取。
   if (result) {
     result->updateBounds();
@@ -1203,9 +1209,8 @@ void Expr::evalWithNulls(
         }
         auto rawNonNulls = nonNullHolder.get()->asRange().bits();
 
-        // 将rows中true对应的行（result会进行必要的扩容），根据rawNonNulls的情况（即为
-        // false的行），设置为null。之所以进行addNulls操作，因为BaseVector::resize在
-        // 进行扩容时，默认将新行设置为not null。
+        // result可能包含rows之外的结果(比如已经填充的partial结果), 这里
+        // 设置null时, 必须通过rows来限定操作范围.
         addNulls(rows, rawNonNulls, context, result);
         return;
       }

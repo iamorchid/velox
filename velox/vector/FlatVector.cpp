@@ -27,7 +27,7 @@ const bool* FlatVector<bool>::rawValues() const {
   VELOX_UNSUPPORTED("rawValues() for bool is not supported");
 }
 
-// [star]
+// [star] FlatVector<bool>::valueAtFast
 // 其他类型的实现见FlatVector-inl.h
 template <>
 bool FlatVector<bool>::valueAtFast(vector_size_t idx) const {

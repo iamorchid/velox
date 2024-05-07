@@ -315,7 +315,16 @@ class AlignedBuffer : public Buffer {
       size_t numElements,
       velox::memory::MemoryPool* pool,
       const std::optional<T>& initValue = std::nullopt) {
+    // 分配的内存布局:
+    // kSizeofAlignedBuffer: 存放Buffer结构体
+    // capacity: 存放数据
+    // preferred padding: 为了让preferredSize同2的幂次对齐，大小可能为0
+    // simd::kPadding: 看起来没有用到, 可以用来存放kEndGuard
+    // |<-------------------------------------------- preferredSize ------------------------------------------->|
+    // |<--- kSizeofAlignedBuffer --->|<------------------ capacity ------------------>|<--- simd::kPadding --->|
+    // |<--- kSizeofAlignedBuffer --->|<------ size ------>|<--- preferred padding --->|<--- simd::kPadding --->|
     size_t size = checkedMultiply(numElements, sizeof(T));
+    // 将申请大小按照2的幂对齐
     size_t preferredSize =
         pool->preferredSize(checkedPlus<size_t>(size, kPaddedSize));
     void* memory = pool->allocate(preferredSize);

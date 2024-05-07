@@ -269,7 +269,7 @@ class EvalCtx {
   }
 
   // 
-  // [star]
+  // [star] moveOrCopyResult
   // 这里的逻辑结合switch的场景会比较好理解些（参考SwitchExpr::evalSpecialForm）。
   // 这里的localResult和rows，对应某一个分支的结果及其过滤条件，而result则是之前已有
   // 分支的计算结果。很显然，对于switch场景，result中已有的结果需要保留。

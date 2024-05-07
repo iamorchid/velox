@@ -25,6 +25,7 @@
 
 namespace facebook::velox {
 
+// 匿名namespace, 里面定义的内容仅仅对当前文件可见
 namespace {
 struct DummyReleaser {
   void addRef() const {}
@@ -33,7 +34,12 @@ struct DummyReleaser {
 };
 } // namespace
 
-// ConstantVector的创建，参考BaseVector.cpp中的wrapInConstant
+//
+// ConstantVector的创建，参考BaseVector.cpp中的wrapInConstant.
+//
+// 对于complex类型, T统一采用ComplexType, 数据的真实类型由type_来说明.
+// 参考ArrayDistinct.cpp中ArrayDistinctFunction的说明.
+//
 template <typename T>
 class ConstantVector final : public SimpleVector<T> {
  public:
@@ -77,7 +83,9 @@ class ConstantVector final : public SimpleVector<T> {
     
     // Special handling for complex types
     // [question]
-    // 对于complext类型，为啥null的情况下也要准备valueVector_?
+    // 对于complext类型, 为啥null的情况下也要准备valueVector_? 看起来是约定, 对于
+    // complex type的ConstantVector, 使用方总是默认valueVector存在的, 可以参考
+    // ArrayDistinctFunction处理constant encoding场景.
     if (type->size() > 0) {
       // Only allow null constants to be created through this interface.
       VELOX_CHECK(isNull_);

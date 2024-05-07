@@ -379,6 +379,8 @@ size_t MemoryPool::preferredSize(size_t size) {
   if (size < 8) {
     return 8;
   }
+  // 上面的if条件保证size不为0, 因此bits::countLeadingZeros返回结果
+  // 一定会小于或者等于63.
   int32_t bits = 63 - bits::countLeadingZeros<uint64_t>(size);
   size_t lower = 1ULL << bits;
   // Size is a power of 2.

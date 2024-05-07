@@ -325,6 +325,7 @@ char* RowContainer::initializeRow(char* row, bool reuse) {
         initialNulls_.data(),
         initialNulls_.size());
   }
+  // row为可变长度时, 会定义rowSizeOffset_
   if (rowSizeOffset_) {
     variableRowSize(row) = 0;
   }

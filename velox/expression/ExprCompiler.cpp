@@ -302,6 +302,7 @@ std::shared_ptr<Expr> compileLambda(
 ExprPtr tryFoldIfConstant(const ExprPtr& expr, Scope* scope) {
   if (expr->isConstant() && scope->exprSet->execCtx()) {
     try {
+      // expr的输入依赖都是constant, 并不会真正从row vector读取数据
       auto rowType = ROW({}, {});
       auto execCtx = scope->exprSet->execCtx();
       auto row = BaseVector::create(rowType, 1, execCtx->pool());
@@ -576,6 +577,7 @@ std::unordered_set<std::string> collectFlatteningCandidates(
 }
 } // namespace
 
+// [star] compileExpressions
 std::vector<std::shared_ptr<Expr>> compileExpressions(
     const std::vector<TypedExprPtr>& sources,
     core::ExecCtx* execCtx,

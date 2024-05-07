@@ -412,6 +412,9 @@ void BaseVector::addNulls(const uint64_t* bits, const SelectivityVector& rows) {
         target[idx] &= ~mask | (bits[idx] | ~selected[idx]);
       },
       [target, bits, selected](int32_t idx) {
+        // 这里的操作思路是:
+        // 1) 对于不再rows中选择的行, null保持不变
+        // 2) 而在rows中选择的行, null情况由bits来决定
         target[idx] &= bits[idx] | ~selected[idx];
       });
 }
@@ -595,14 +598,14 @@ void BaseVector::ensureWritable(const SelectivityVector& rows) {
 
   // 扩容时，默认新增的行会采用not null，这样做是有意义的，因为BaseVector::addNulls
   // 是基于AND操作判断后续操作是不是需要将具体行置为null。
-  // [star]
+  // [star] BaseVector::resize
   // resize是一个virtual方法, BaseVector只会处理null bits相关的resize, 而data相关
   // 的resize则由子类实现，可以参考FlatVector-inl.h中resize.
   this->resize(newSize);
   this->resetDataDependentFlags(&rows);
 }
 
-// [star]
+// [star] BaseVector::ensureWritable
 // 参考EvalCtx.h文件中的moveOrCopyResult函数。
 // Makes 'result' writable for 'rows'. 
 void BaseVector::ensureWritable(

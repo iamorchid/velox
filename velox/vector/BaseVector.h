@@ -113,6 +113,9 @@ class BaseVector {
 
   template <typename T>
   T* as() {
+    // 如果vector真实类型是ConstantVector<int64_t>, 调用as<ConstantVector<int32_t>>
+    // 虽然可以通过编译, 但将会返回nullptr, 因为模版类使用不同的模版参数事例化后, 将得到不同
+    // 的类型.
     static_assert(std::is_base_of_v<BaseVector, T>);
     return dynamic_cast<T*>(this);
   }
