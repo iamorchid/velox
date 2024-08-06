@@ -56,6 +56,7 @@ SwitchExpr::SwitchExpr(
       this->type()->toString());
 }
 
+// [star][expr] SwitchExpr::evalSpecialForm
 void SwitchExpr::evalSpecialForm(
     const SelectivityVector& rows,
     EvalCtx& context,
@@ -66,6 +67,7 @@ void SwitchExpr::evalSpecialForm(
   LocalSelectivityVector thenRows(context);
 
   // SWITCH: fix finalSelection at "rows" unless already fixed
+  // 关于如何使用final selection，参考EvalCtx.h中的moveOrCopyResult方法
   ScopedFinalSelectionSetter scopedFinalSelectionSetter(context, &rows);
   if (propagatesNulls_) {
     // If propagates nulls, we load lazies before conditions so that we can
@@ -77,6 +79,11 @@ void SwitchExpr::evalSpecialForm(
       const auto& vector = context.getField(field->index(context));
       if (vector->mayHaveNulls()) {
         LocalDecodedVector decoded(context, *vector, remaining);
+        // [question]
+        // localResult初始值为null, 则addNulls会导致localResult初始化为ConstantVector.
+        // 后面eval时，对localResult进行更新不会报错吗？
+        // [answer]
+        // 不会，因为在对localResult进行更新前，会调用BaseVector::ensureWritable.
         addNulls(remaining, decoded->nulls(&remaining), context, localResult);
         remaining.deselectNulls(
             decoded->nulls(&remaining), remaining.begin(), remaining.end());

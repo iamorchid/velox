@@ -23,7 +23,7 @@ class ConstantExpr : public SpecialForm {
   explicit ConstantExpr(VectorPtr value)
       : SpecialForm(
             value->type(),
-            std::vector<ExprPtr>(),
+            std::vector<ExprPtr>() /* inputs */,
             "literal",
             !value->isNullAt(0) /* supportsFlatNoNullsFastPath */,
             false /* trackCpuUsage */),
@@ -32,7 +32,7 @@ class ConstantExpr : public SpecialForm {
     // sharedConstantValue_ may be modified so we should take our own copy to
     // prevent sharing across threads.
     sharedConstantValue_ =
-        BaseVector::wrapInConstant(1, 0, std::move(value), true);
+        BaseVector::wrapInConstant(1, 0, std::move(value), true /* copyBase */);
   }
 
   void evalSpecialForm(

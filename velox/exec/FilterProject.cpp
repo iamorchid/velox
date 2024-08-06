@@ -110,6 +110,7 @@ bool FilterProject::allInputProcessed() {
   if (!input_) {
     return true;
   }
+  // numProcessedInputRows_表示的是当前input_中已经处理过的行数
   if (numProcessedInputRows_ == input_->size()) {
     input_ = nullptr;
     return true;

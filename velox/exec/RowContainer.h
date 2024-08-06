@@ -69,6 +69,7 @@ class Accumulator {
 
 using normalized_key_t = uint64_t;
 
+// 理解单元测试: TEST_F(RowContainerTest, types)
 struct RowContainerIterator {
   int32_t allocationIndex = 0;
   int32_t rowOffset = 0;
@@ -171,6 +172,12 @@ class RowColumn {
       // which is always false and always safe to do.
       return static_cast<uint64_t>(offset) << 32;
     }
+
+    // nullOffset对应的null bit所在的位置(以bit计数), (nullOffset & 7)
+    // 对应的是字节内的位置, ((nullOffset & ~7UL) << 5)表示的是对应字节
+    // 所在的位置. packedOffsets_ 具体格式:
+    // | <- 32 ~ 63 -> |  <- 8 ~ 31 ->  | <- 0 ~ 7 -> |
+    //   columnOffset  | nullByteOffset | nullBitMask
     return (1UL << (nullOffset & 7)) | ((nullOffset & ~7UL) << 5) |
         static_cast<uint64_t>(offset) << 32;
   }
@@ -928,7 +935,9 @@ class RowContainer {
       int32_t column) {
     using T = typename TypeTraits<Kind>::NativeType;
     if (decoded.isNullAt(index)) {
+      // nullMask(形如0b00100000)对应的bit为1时, 表示为null
       row[nullByte] |= nullMask;
+
       // Do not leave an uninitialized value in the case of a
       // null. This is an error with valgrind/asan.
       *reinterpret_cast<T*>(row + offset) = T();
@@ -1428,11 +1437,12 @@ class RowContainer {
   // This is the original normalized key size regardless of whether
   // disableNormalizedKeys() is called or not.
   int originalNormalizedKeySize_;
-  // Extra bytes to reserve before  each added row for a normalized key. Set to
+  // Extra bytes to reserve before each added row for a normalized key. Set to
   // 0 after deciding not to use normalized keys.
   int normalizedKeySize_;
   // Copied over the null bits of each row on initialization. Keys are
   // not null, aggregates are null.
+  // initialNulls_中bit为1时, 表示null
   std::vector<uint8_t> initialNulls_;
   uint64_t numRows_ = 0;
   // Head of linked list of free rows.

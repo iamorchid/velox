@@ -19,6 +19,9 @@
 #include "velox/type/SimpleFunctionApi.h"
 #include "velox/type/Type.h"
 
+// [star][expr][func] VELOX_DEFINE_FUNCTION_TYPES
+// 这里的__Velox_ExecParams对应VectorExec(见UdfTypeResolver.h)之类的类型
+//
 #define VELOX_DEFINE_FUNCTION_TYPES(__Velox_ExecParams)                 \
   template <typename TArgs>                                             \
   using arg_type =                                                      \

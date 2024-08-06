@@ -154,7 +154,9 @@ bool equalKeys(
 }
 } // namespace
 
+// [star][agg] GroupingSet::addInput
 void GroupingSet::addInput(const RowVectorPtr& input, bool mayPushdown) {
+  // isGlobal_为true, 说明grouping keys为空
   if (isGlobal_) {
     addGlobalAggregationInput(input, mayPushdown);
     return;
@@ -352,6 +354,7 @@ std::vector<Accumulator> GroupingSet::accumulators(bool excludeToIntermediate) {
   return accumulators;
 }
 
+// [star][agg] GroupingSet::createHashTable
 void GroupingSet::createHashTable() {
   if (ignoreNullKeys_) {
     table_ = HashTable<true>::createForAggregation(

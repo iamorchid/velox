@@ -890,8 +890,7 @@ void Task::initializePartitionOutput() {
       bufferManager,
       "Unable to initialize task. "
       "PartitionedOutputBufferManager was already destructed");
-  std::shared_ptr<const core::PartitionedOutputNode> partitionedOutputNode{
-      nullptr};
+  std::shared_ptr<const core::PartitionedOutputNode> partitionedOutputNode;
   int numOutputDrivers{0};
   {
     std::unique_lock<std::timed_mutex> l(mutex_);
@@ -908,6 +907,8 @@ void Task::initializePartitionOutput() {
             factory->needsPartitionedOutput(),
             "Only one output pipeline per task is supported");
       } else {
+        // PartitionedOutputNode基于plan中的partitioning scheme动态生成, 
+        // 参考: VeloxQueryPlanConverterBase::toVeloxQueryPlan
         partitionedOutputNode = factory->needsPartitionedOutput();
         if (partitionedOutputNode != nullptr) {
           numDriversInPartitionedOutput_ = factory->numDrivers;
@@ -1982,12 +1983,9 @@ ContinueFuture Task::terminate(TaskState terminalState) {
     // after terminate as tests expect.
     numRunningDrivers_ = 0;
     for (auto& driver : drivers_) {
-      if (driver) {
-        if (enterForTerminateLocked(driver->state()) ==
-            StopReason::kTerminate) {
-          offThreadDrivers.push_back(std::move(driver));
-          driverClosedLocked();
-        }
+      if (driver && enterForTerminateLocked(driver->state()) == StopReason::kTerminate) {
+        offThreadDrivers.push_back(std::move(driver));
+        driverClosedLocked();
       }
     }
     exchangeClients.swap(exchangeClients_);
@@ -2607,11 +2605,16 @@ std::string Task::errorMessage() const {
   return errorMessageLocked();
 }
 
+// [star][task] Task::enter和Task::leave都是在Driver::runInternal中用到
 StopReason Task::enter(ThreadState& state, uint64_t nowMicros) {
   TestValue::adjust("facebook::velox::exec::Task::enter", &state);
   std::lock_guard<std::timed_mutex> l(mutex_);
   VELOX_CHECK(state.isEnqueued);
+  
+  // 这里在将state切换为terminated或者onThread之前, 
+  // 先将enqueued置为false
   state.isEnqueued = false;
+  
   if (state.isTerminated) {
     return StopReason::kAlreadyTerminated;
   }
@@ -2621,8 +2624,7 @@ StopReason Task::enter(ThreadState& state, uint64_t nowMicros) {
   const auto reason = shouldStopLocked();
   if (reason == StopReason::kTerminate) {
     state.isTerminated = true;
-  }
-  if (reason == StopReason::kNone) {
+  } else if (reason == StopReason::kNone) {
     ++numThreads_;
     if (numThreads_ == 1) {
       onThreadSince_ = nowMicros;
@@ -2634,16 +2636,25 @@ StopReason Task::enter(ThreadState& state, uint64_t nowMicros) {
 }
 
 StopReason Task::enterForTerminateLocked(ThreadState& state) {
+  // 1) state.isOnThread() 表示driver在其他线程上执行, 当前线程不能对其进行terminate
+  //    操作, driver在off thread (即Task::leave)时, 会感知到task将要退出, 并执行相应
+  //    的terminate操作.
+  // 2) state.isTerminated为true, 表示其他path正在处理driver的terminate操作.
   if (state.isOnThread() || state.isTerminated) {
-    state.isTerminated = true;
+    // 这个操作感觉不必要, 反而会让isTerminated的语义变等复杂, 因为当前path并不处理driver
+    // 的terminate操作.
+    state.isTerminated = true; 
     return StopReason::kAlreadyOnThread;
   }
+
   if (pauseRequested_) {
     // NOTE: if the task has been requested to pause, then we let the task
     // resume code path to close these off thread drivers.
     return StopReason::kPause;
   }
+
   state.isTerminated = true;
+  // 这个操作没有啥意义, 难道是为了更准确统计driver offThread的时间?
   state.setThread();
   return StopReason::kTerminate;
 }
@@ -2808,6 +2819,7 @@ StopReason Task::shouldStopLocked() {
   if (pauseRequested_) {
     return StopReason::kPause;
   }
+  // 见 Task::setError -> Task::terminate
   if (terminateRequested_) {
     return StopReason::kTerminate;
   }

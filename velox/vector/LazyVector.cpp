@@ -93,6 +93,8 @@ void VectorLoader::load(
   raw_vector<vector_size_t> positions(rows.countSelected());
   simd::indicesOfSetBits(
       rows.allBits(), rows.begin(), rows.end(), positions.data());
+
+  // std::vector<vector_size_t> 可以隐士转换为 RowSet
   load(positions, hook, resultSize, result);
 }
 
@@ -102,7 +104,7 @@ VectorPtr LazyVector::slice(vector_size_t offset, vector_size_t length) const {
   return vector_->slice(offset, length);
 }
 
-//   static
+// static
 // This gurantee that vectors are loaded but it does not gurantee that vector
 // will be free of any nested lazy vector i.e, references to Loaded lazy vectors
 // are not replaced with their underlying loaded vector.

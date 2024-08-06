@@ -72,7 +72,7 @@ HashTable<ignoreNullKeys>::HashTable(
       allowDuplicates,
       isJoinBuild,
       hasProbedFlag,
-      hashMode_ != HashMode::kHash,
+      hashMode_ != HashMode::kHash, // hasNormalizedKey
       pool);
   nextOffset_ = rows_->nextOffset();
 }
@@ -103,6 +103,7 @@ class ProbeState {
     row_ = row;
     bucketOffset_ = table.bucketOffset(hash);
     const auto tag = BaseHashTable::hashTag(hash);
+    // 构建一个向量, 让元素的每个值都为tag
     wantedTags_ = BaseHashTable::TagVector::broadcast(tag);
     group_ = nullptr;
     indexInTags_ = kNotSet;
@@ -118,6 +119,10 @@ class ProbeState {
     tagsInTable_ = BaseHashTable::loadTags(
         reinterpret_cast<uint8_t*>(table.table_), bucketOffset_);
     table.incrementTagLoads();
+
+    // 将向量bool(即xsimd::batch_bool)转成bit mask, 其中两个向量相等
+    // 的元素会在bit mask中对应1 (即这里通过向量计算, 快速判断预期tag所
+    // 处的位置).
     hits_ = simd::toBitMask(tagsInTable_ == wantedTags_);
     if (hits_) {
       loadNextHit<op>(table, firstKey);
@@ -318,6 +323,7 @@ void HashTable<ignoreNullKeys>::storeRowPointer(
     reinterpret_cast<char**>(table_)[index] = row;
     return;
   }
+  // 此时, index 对应bucket中可用slot的索引 + bucketOffset_
   const int64_t offset = bucketOffset(index);
   auto* bucket = bucketAt(offset);
   const auto slotIndex = index & (sizeof(TagVector) - 1);
@@ -396,6 +402,7 @@ FOLLY_ALWAYS_INLINE void HashTable<ignoreNullKeys>::fullProbe(
               lookup.normalizedKeys[row];
         },
         [&](int32_t row, uint64_t index) {
+          // index 对应bucket中可用slot的索引 + bucketOffset_
           return isJoin ? nullptr : insertEntry(lookup, index, row);
         },
         numTombstones_,
@@ -408,6 +415,7 @@ FOLLY_ALWAYS_INLINE void HashTable<ignoreNullKeys>::fullProbe(
       0,
       [&](char* group, int32_t row) { return compareKeys(group, lookup, row); },
       [&](int32_t row, uint64_t index) {
+        // index 对应bucket中可用slot的索引 + bucketOffset_
         return isJoin ? nullptr : insertEntry(lookup, index, row);
       },
       numTombstones_,
@@ -443,6 +451,8 @@ void populateNormalizedKeys(HashLookup& lookup, int8_t sizeBits) {
   for (auto row : lookup.rows) {
     auto hash = hashes[row];
     keys[row] = hash; // NOLINT
+    // hash当前对应的是normalized key, 这里需要将其转成适合
+    // hash操作的hash key.
     hashes[row] = mixNormalizedKey(hash, sizeBits);
   }
 }
@@ -1522,6 +1532,10 @@ void HashTable<ignoreNullKeys>::decideHashMode(
     hashers_[i]->cardinality(reservePct(), rangeSizes[i], distinctSizes[i]);
     distinctsWithReserve = safeMul(distinctsWithReserve, distinctSizes[i]);
     rangesWithReserve = safeMul(rangesWithReserve, rangeSizes[i]);
+
+    // 可以看到, 这一会优先尝试采用range模式, 这种模式计算hash key效率更高,
+    // 即通过value-min即可得到. 注意: bestWithReserve是由不同的hasher采
+    // 用各自最优的模式计算等到的.
     if (distinctSizes[i] == VectorHasher::kRangeTooLarge &&
         rangeSizes[i] != VectorHasher::kRangeTooLarge) {
       useRange[i] = true;
@@ -1536,6 +1550,7 @@ void HashTable<ignoreNullKeys>::decideHashMode(
     }
   }
 
+  // 采用kArray模式时, group keys和array index一一对应
   if (rangesWithReserve < kArrayHashMaxSize && !disableRangeArrayHash_) {
     std::fill(useRange.begin(), useRange.end(), true);
     capacity_ = setHasherMode(hashers_, useRange, rangeSizes, distinctSizes);
@@ -1549,12 +1564,16 @@ void HashTable<ignoreNullKeys>::decideHashMode(
     setHashMode(HashMode::kArray, numNew, spillInputStartPartitionBit);
     return;
   }
+
+  // 采用kNormalizedKey模式时, group keys和hash一一对应（hash通过每个key的
+  // range组合得到, 值范围比较大, 不适合作为array的index)
   if (rangesWithReserve != VectorHasher::kRangeTooLarge) {
     std::fill(useRange.begin(), useRange.end(), true);
     setHasherMode(hashers_, useRange, rangeSizes, distinctSizes);
     setHashMode(HashMode::kNormalizedKey, numNew, spillInputStartPartitionBit);
     return;
   }
+
   if (hashers_.size() == 1 && distinctsWithReserve > 10000) {
     // A single part group by that does not go by range or become an array
     // does not make sense as a normalized key unless it is very small.
@@ -1568,11 +1587,14 @@ void HashTable<ignoreNullKeys>::decideHashMode(
     setHashMode(HashMode::kArray, numNew, spillInputStartPartitionBit);
     return;
   }
+
+  // 采用kHash模式时, group keys和hash是多对一的关系
   if (distinctsWithReserve == VectorHasher::kRangeTooLarge &&
       rangesWithReserve == VectorHasher::kRangeTooLarge) {
     setHashMode(HashMode::kHash, numNew, spillInputStartPartitionBit);
     return;
   }
+
   // The key concatenation fits in 64 bits.
   if (bestWithReserve != VectorHasher::kRangeTooLarge) {
     enableRangeWhereCan(rangeSizes, distinctSizes, useRange);
@@ -2176,6 +2198,7 @@ std::string BaseHashTable::RowsIterator::toString() const {
       rowContainerIterator_.toString());
 }
 
+// [star][HashTable] HashTable::prepareForGroupProbe
 template <bool ignoreNullKeys>
 void HashTable<ignoreNullKeys>::prepareForGroupProbe(
     HashLookup& lookup,

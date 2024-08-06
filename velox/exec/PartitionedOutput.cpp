@@ -231,6 +231,8 @@ void PartitionedOutput::estimateRowSizes() {
   }
 }
 
+// Driver在执行完addInput后, 会执行getOutput, 因此不会出现getOutput
+// 没有执行而连续掉用getOutput两次的情况.
 void PartitionedOutput::addInput(RowVectorPtr input) {
   initializeInput(std::move(input));
 
