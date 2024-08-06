@@ -140,8 +140,12 @@ void DecodedVector::combineWrappers(
   auto topEncoding = vector->encoding();
   BaseVector* values = nullptr;
   if (topEncoding == VectorEncoding::Simple::DICTIONARY) {
+    // vector->wrapInfo(): dict中的每一行同base vector中的行的映射关系（多对一）
     indices_ = vector->wrapInfo()->as<vector_size_t>();
+    // vector->valueVector(): dict使用的base vector
     values = vector->valueVector().get();
+    // dict本身的nulls信息，dict某一行是否为null，除了dict本身的nulls信息外，还依赖base vector的nulls信息。
+    // 参考：DictionaryVector-inl.h文件中的DictionaryVector<T>::isNullAt
     nulls_ = vector->rawNulls();
     if (nulls_) {
       hasExtraNulls_ = true;
@@ -197,6 +201,8 @@ void DecodedVector::applyDictionaryWrapper(
 
   auto newIndices = dictionaryVector.wrapInfo()->as<vector_size_t>();
   auto newNulls = dictionaryVector.rawNulls();
+  // 如果newNulls为null（表示dictionaryVector不存在null的行），则说明进行
+  // 当前merge的时候，可以直接复用上一次merge得到的nulls结果，而无需进行复制。
   if (newNulls) {
     hasExtraNulls_ = true;
     mayHaveNulls_ = true;

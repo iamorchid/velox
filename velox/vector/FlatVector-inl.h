@@ -285,6 +285,7 @@ void FlatVector<T>::copyValuesAndNulls(
   }
 }
 
+// [star] FlatVector<T>::copyRanges
 template <typename T>
 void FlatVector<T>::copyRanges(
     const BaseVector* source,
@@ -338,14 +339,14 @@ void FlatVector<T>::copyRanges(
 
     if constexpr (std::is_same_v<T, bool>) {
       auto rawValues = reinterpret_cast<uint64_t*>(rawValues_);
-      auto* sourceValues = flatSource->template rawValues<uint64_t>();
+      auto* sourceValues = flatSource->template rawValues<uint64_t>(); // 模版方法
       applyToEachRange(
           ranges, [&](auto targetIndex, auto sourceIndex, auto count) {
             bits::copyBits(
                 sourceValues, sourceIndex, rawValues, targetIndex, count);
           });
     } else {
-      const T* sourceValues = flatSource->rawValues();
+      const T* sourceValues = flatSource->rawValues(); // 非模版方法
       applyToEachRange(
           ranges, [&](auto targetIndex, auto sourceIndex, auto count) {
             if (Buffer::is_pod_like_v<T>) {
@@ -366,12 +367,12 @@ void FlatVector<T>::copyRanges(
       if (sourceRawNulls) {
         BaseVector::copyNulls(rawNulls, sourceRawNulls, ranges);
       } else {
-        BaseVector::setNulls(rawNulls, ranges, false);
+        BaseVector::setNulls(rawNulls, ranges, false /* isNull */);
       }
     }
   } else if (source->isConstantEncoding()) {
     if (source->isNullAt(0)) {
-      BaseVector::setNulls(rawNulls, ranges, true);
+      BaseVector::setNulls(rawNulls, ranges, true /* isNull */);
       return;
     }
     auto constant = source->asUnchecked<ConstantVector<T>>();

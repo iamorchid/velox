@@ -291,6 +291,7 @@ xsimd::batch_bool<T, A> leadingMask(int n, const A& = {});
 // using 1 bit per element.
 template <typename T, typename A = xsimd::default_arch>
 auto toBitMask(xsimd::batch_bool<T, A> mask, const A& arch = {}) {
+  // detail::BitMask<T, A>的范型申明见上面, 特化见SimdUtil-inl.h头文件
   return detail::BitMask<T, A>::toBitMask(mask, arch);
 }
 

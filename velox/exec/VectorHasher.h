@@ -471,6 +471,8 @@ class VectorHasher {
     return inRange;
   }
 
+  // 参考VectorHasherTest.cpp中的testComputeValueIds.
+  // StringView有自己特定实现
   template <typename T>
   uint64_t valueId(T value) {
     auto int64Value = toInt64(value);
@@ -485,8 +487,10 @@ class VectorHasher {
     unique.setId(uniqueValues_.size() + 1);
     auto pair = uniqueValues_.insert(unique);
     if (!pair.second) {
+       // value之前已经存在
       return pair.first->id();
     }
+    // 处理新value（此时已经插入uniqueValues_）
     updateRange(int64Value);
     if (uniqueValues_.size() >= rangeSize_) {
       return kUnmappable;
@@ -556,6 +560,8 @@ class VectorHasher {
   // Members for fast map to int domain for array/normalized key.
   // Maximum integer mapping. If distinct count exceeds this,
   // array/normalized key mapping fails.
+  // isRange_为true时, rangeSize_表示max_ - min_的范围;
+  // isRange_为false时, rangeSize_表示distinct值的个数;
   uint64_t rangeSize_ = 0;
 
   // Multiply int mapping by this before adding it to array index/normalized
@@ -565,6 +571,9 @@ class VectorHasher {
   // True if the mapping is simply value - min_.
   bool isRange_ = false;
 
+  // hasRange_为true, 不表示isRange_也为true. 需要先通过computeValueIds之类的
+  // 函数统计range(设置hasRange_为true), 然后再通过enableValueRange开启range
+  // 模式(设置isRange_为true).
   // True if 'min_' and 'max_' are initialized.
   bool hasRange_ = false;
 
@@ -619,13 +628,21 @@ inline uint64_t VectorHasher::valueId(StringView value) {
     return number - min_ + 1;
   }
 
+  // UniqueValueComparer同时支持int64_t和string的比较
   UniqueValue unique(data, size);
   unique.setId(uniqueValues_.size() + 1);
   auto pair = uniqueValues_.insert(unique);
   if (!pair.second) {
     return pair.first->id();
   }
+
+  // 上面UniqueValue创建时, 没有对StringView数据进行deep copy(因为极
+  // 可能已经存在于uniqueValues_). 仅当插入新的value时, 才进行复制.
   copyStringToLocal(&*pair.first);
+
+  // 虽然VectorHasher::cardinality函数会统一检察range和distinct是否
+  // 会overflow, 但StringView的场景比较特殊, 它的range overflow还同
+  // StringView的数据长度有关.
   if (!rangeOverflow_) {
     if (size > kStringASRangeMaxSize) {
       setRangeOverflow();
@@ -633,6 +650,7 @@ inline uint64_t VectorHasher::valueId(StringView value) {
       updateRange(stringAsNumber(data, size));
     }
   }
+
   if (uniqueValues_.size() >= rangeSize_ || distinctOverflow_) {
     return kUnmappable;
   }
