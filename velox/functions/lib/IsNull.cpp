@@ -73,8 +73,30 @@ class IsNullFunction : public exec::VectorFunction {
       }
     }
 
+    //
+    // 这里的nulls为nullptr, 表明所有的rows都不为null. 参数result为nullptr时, 下面的
+    // moveOrCopyResult会直接使用localResult作为result. 如果参数rows并没有覆盖input
+    // 的所有rows, 这种不会有问题吗? 不会.
+    //
+    // 首先, VectorFunction默认采用的defaultNullBehavior为true, 即velox框架保证参数
+    // rows指定的行中, 不会包含input为null的情况, 同时我们保证result中这些行的处理结果也
+    // 一定不为null. 虽然, 对于rows没有指定的行, 我们返回了非null, Expr::evalWithNulls
+    // 会自动将rows没有覆盖的行置为null.
+    //
+    // 其次, 对于case/when等场景, 如果此时result为nullptr, 虽然当前分支会将其他分支的结
+    // 果暂时设置为非null (真实结果可能为null). 但等到执行其他分支时, moveOrCopyResult
+    // 会为相关的行设置正确的结果以及nulls.
+    //
+    // 再次, 对于包含filter的情况(见ProjectFilter.cpp), 虽然这里filter之外的行也设置了
+    // 非null(注意, Expr::evalWithNulls不会自动将这些行置为null), 但ProjectFilter算子
+    // 返回output时, 会自动过滤掉filter之外的行.
+    //
+    // 因此, 对于defaultNullBehavior为true的VectorFunction, 只需要保证参数rows中指定
+    // 行的value以及null设置正确, 就不会有问题.
+    //
     auto localResult = std::make_shared<FlatVector<bool>>(
         pool, BOOLEAN(), nullptr, rows.end(), isNull, std::vector<BufferPtr>{});
+    
     context.moveOrCopyResult(localResult, rows, result);
   }
 

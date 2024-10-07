@@ -319,7 +319,6 @@ void FlatVector<T>::copyRanges(
 
   // 如果本Vector和source vector都没有nulls, 那么null bits就不用操作了.
   // 否则, 就需要对本Vector的null bits进行操作.
-  const uint64_t* sourceRawNulls = source->rawNulls();
   uint64_t* rawNulls = const_cast<uint64_t*>(BaseVector::rawNulls_);
   if (source->mayHaveNulls()) {
     rawNulls = BaseVector::mutableRawNulls();
@@ -366,6 +365,9 @@ void FlatVector<T>::copyRanges(
     }
 
     if (rawNulls) {
+      // 通过BaseVector::rawNulls()的注释可以知道, 除了FlatVector之外, 其他vector
+      // 类型不应该使用rawNulls_(这里已经明确知道source是FlatVector了).
+      const uint64_t* sourceRawNulls = source->rawNulls();
       if (sourceRawNulls) {
         BaseVector::copyNulls(rawNulls, sourceRawNulls, ranges);
       } else {

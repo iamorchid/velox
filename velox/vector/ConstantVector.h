@@ -458,6 +458,10 @@ class ConstantVector final : public SimpleVector<T> {
       // ConstantVector会一直保持对base vector的引用。
       valueVector_ = nullptr;
     }
+    // else {
+    //   // 对于ComplexType类型的ConstantVector, 它的value_字段没有意义, 
+    //   // 即对应的是ComplexType value_ (不会赋值, 它的size为0)
+    // }
     makeNullsBuffer();
     initialized_ = true;
   }

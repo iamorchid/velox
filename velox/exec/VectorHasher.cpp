@@ -251,6 +251,7 @@ bool VectorHasher::makeValueIdsFlatWithNulls(
   return success;
 }
 
+// [star][HashTable] VectorHasher::makeValueIdsDecoded
 template <typename T, bool mayHaveNulls>
 bool VectorHasher::makeValueIdsDecoded(
     const SelectivityVector& rows,
