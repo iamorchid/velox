@@ -176,7 +176,7 @@ class Expr {
   ///
   /// @param parentExprSet pointer to the parent ExprSet which is calling
   /// evaluate on this expression. Should only be set for top level expressions
-  /// and not passed on to child expressions as it is ssed to setup exception
+  /// and not passed on to child expressions as it is used to setup exception
   /// context.
   void eval(
       const SelectivityVector& rows,

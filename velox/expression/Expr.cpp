@@ -781,6 +781,7 @@ void Expr::evalFlatNoNullsImpl(
   releaseInputValues(context);
 }
 
+// [star][expr] Expr::eval
 void Expr::eval(
     const SelectivityVector& rows,
     EvalCtx& context,

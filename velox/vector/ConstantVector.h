@@ -181,6 +181,7 @@ class ConstantVector final : public SimpleVector<T> {
 
   virtual const T valueAt(vector_size_t /*idx*/) const override {
     VELOX_DCHECK(initialized_);
+    // 这里会要求T不能为ComplextType
     SimpleVector<T>::checkElementSize();
     return value();
   }

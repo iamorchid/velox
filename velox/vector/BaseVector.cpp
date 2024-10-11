@@ -622,6 +622,9 @@ void BaseVector::ensureWritable(
     VectorPtr& result,
     VectorPool* vectorPool) {
   if (!result) {
+    // 注意, 这里创建的VectorPtr使用的nulls为nullptr, 即意味着所有行
+    // 都不为null (nulls和rows并不一致). 这样操作并不会有问题, 具体原
+    // 因参见IsNull.cpp中的说明.
     if (vectorPool) {
       result = vectorPool->get(type, rows.end());
     } else {
@@ -629,6 +632,7 @@ void BaseVector::ensureWritable(
     }
     return;
   }
+
   const auto& resultType = result->type();
   bool isUnknownType = resultType->containsUnknown();
   if (result->encoding() == VectorEncoding::Simple::LAZY) {
@@ -651,13 +655,13 @@ void BaseVector::ensureWritable(
 
   // The copy-on-write size is the max of the writable row set and the vector.
   auto targetSize = std::max<vector_size_t>(rows.end(), result->size());
+  TypePtr targetType = isUnknownType ? type : resultType;
 
   VectorPtr copy;
   if (vectorPool) {
-    copy = vectorPool->get(isUnknownType ? type : resultType, targetSize);
+    copy = vectorPool->get(targetType, targetSize);
   } else {
-    copy =
-        BaseVector::create(isUnknownType ? type : resultType, targetSize, pool);
+    copy = BaseVector::create(targetType, targetSize, pool);
   }
   SelectivityVector copyRows(result->size());
   // 1）参考EvalCtx.cpp中的resizePrimitiveTypeVectors如何设置rows

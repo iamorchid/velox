@@ -70,6 +70,10 @@ void FilterProject::initialize() {
           projection, inputType, i, identityProjections_);
       if (!identityProjection) {
         allExprs.push_back(projection);
+        // 在有filter定义的情况下, 这里的inputChannel (即allExprs.size() - 1)
+        // 看起来有些奇怪, 因为filter expr不会产生结果, 而这里的inputChannel计数
+        // 却考虑了filter expr的. 
+        // 具体原因, 参考FilterProject::project相关说明.
         resultProjections_.emplace_back(allExprs.size() - 1, i);
       }
     }
@@ -176,6 +180,9 @@ RowVectorPtr FilterProject::getOutput() {
 std::vector<VectorPtr> FilterProject::project(
     const SelectivityVector& rows,
     EvalCtx& evalCtx) {
+  // hasFilter_为true的情况下, results[0]为nullptr, ExprSet::eval
+  // 会为每一个expr保留一个result entry. 只是没有参与计算的expr, 它对应
+  // VectorPtr将为null.
   std::vector<VectorPtr> results;
   exprs_->eval(
       hasFilter_ ? 1 : 0, numExprs_, !hasFilter_, rows, evalCtx, results);

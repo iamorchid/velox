@@ -296,6 +296,10 @@ void FlatVector<T>::copyRanges(
   }
 
   source = source->loadedVector();
+
+  // 这里确保了source不会为RowVector, ArrayVector以及MapVector. 因为FlatVector
+  // 使用的TypeKind不可能为ROW, ARRAY或者MAP. 因此, 对于已经loaded source, 这里
+  // 基本可以确定为SimpleVector.
   VELOX_CHECK_EQ(BaseVector::typeKind(), source->typeKind());
 
   if constexpr (std::is_same_v<T, StringView>) {
@@ -340,14 +344,15 @@ void FlatVector<T>::copyRanges(
 
     if constexpr (std::is_same_v<T, bool>) {
       auto rawValues = reinterpret_cast<uint64_t*>(rawValues_);
-      auto* sourceValues = flatSource->template rawValues<uint64_t>(); // 模版方法
+      auto* sourceValues = flatSource->template rawValues<uint64_t>();
       applyToEachRange(
           ranges, [&](auto targetIndex, auto sourceIndex, auto count) {
             bits::copyBits(
                 sourceValues, sourceIndex, rawValues, targetIndex, count);
           });
     } else {
-      const T* sourceValues = flatSource->rawValues(); // 非模版方法
+      // rawValues()不是BaseVector的虚函数, 而是FlatVector特有的模版方法
+      const T* sourceValues = flatSource->rawValues();
       applyToEachRange(
           ranges, [&](auto targetIndex, auto sourceIndex, auto count) {
             if (Buffer::is_pod_like_v<T>) {

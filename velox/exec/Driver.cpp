@@ -584,8 +584,8 @@ StopReason Driver::runInternal(
         //    而blocked解除, 则是由于下游task 或者 其他pipeline的source node取走了数据。
         //
         // 3) 其他node基本不会出现blocked情况, driver通过needsInput来判断是否需要执行addInput.
-        //    这里的node看起来是不能因为数据堆积等原因blocked, 否则driver挂起来后, 它的getOutput
-        //    的不到执行, 那怎么解除blocked状态呢? 
+        //    这里的node不能因为数据堆积等原因而进入blocked状态. 否则driver挂起来后, 它的getOutput
+        //    得不到执行, 那怎么解除blocked状态呢? 
         //
         //    因此, driver如果返回了StopReason::kBlock, 那么他的blocked解除必须依赖其他task
         //    或者当前task的其他pipeline的driver.
