@@ -205,6 +205,7 @@ void Expr::clearMetaData() {
   sameAsParentDistinctFields_ = false;
 }
 
+// static
 void Expr::mergeFields(
     std::vector<FieldReference*>& distinctFields,
     std::unordered_set<FieldReference*>& multiplyReferencedFields,
@@ -832,6 +833,23 @@ void Expr::eval(
   // tree might need only a subset, whereas other might need a different subset.
   //
   // TODO: Re-work the logic of deciding when to load which field.
+
+  //
+  // 通过Expr::evalEncodings中的peeling处理逻辑可以知道, 当LazyVector没有loaded时,
+  // 是不会对vector进行peel操作的. 因此, 第一次执行公共子表达式时, 会使用没有peel处理过
+  // 的vector. 而第二次执行改公共子表达式时, 因为第一次执行时已经load过了, 则后续可能使用
+  // peel过的vector, 进而导致无法命中公共子表达式的cache. 
+  // 
+  // 公共子表达式分为两种情况 ():
+  // case#1: select f2(IF(cond, f1(input1, input2))), f3(IF(cond, f1(input1, input2))), ...
+  // case#2: select f2(IF(cond, f1(input1, input2))) + f3(IF(cond, f1(input1, input2))), ...
+  // 对于case#1, 因为公共子表达式IF(cond, f1(input1, input2))存在于两个顶层的expr中,
+  // ExprSet::eval会保证总是load input1和input2对应的LazyVector。
+  // 对于case#2, 上述公共子表达式仅仅出现在单个顶层expr中, 它的提前加载需要在Expr::eval中处理.
+  // 
+  // 注意, compileExpressions保证了公共子表达式的子表达式不会表示为isMultiplyReferenced_,
+  // 即不会作为shared, 因为缓存它们没有任何意义 (缓存parent expr就够了).
+  //
   if (!hasConditionals_ || distinctFields_.size() == 1 ||
       shouldEvaluateSharedSubexp(context) ||
       !context.deferredLazyLoadingEnabled()) {
@@ -845,6 +863,10 @@ void Expr::eval(
     // loading fields that are not in multiplyReferencedFields_.  In case
     // evaluatesArgumentsOnNonIncreasingSelection() is true, this is delayed
     // until we process the inputs of ConjunctExpr.
+    //
+    // 这里的Expr::multiplyReferencedFields_表示的是同一个expr下多个子表达式都包含的fields,
+    // 而ExprSet::multiplyReferencedFields_则指出现在多个顶层expr中的fields.
+    //
     for (const auto& field : multiplyReferencedFields_) {
       context.ensureFieldLoaded(field->index(context), rows);
     }
@@ -1966,6 +1988,10 @@ void ExprSet::eval(
   // If b is a LazyVector and f(a) AND g(b) expression is evaluated first, it
   // will load b only for rows where f(a) is true. However, h(b) projection
   // needs all rows for "b".
+  //
+  // 这里的ExprSet::multiplyReferencedFields_, 是指出现在多个顶层expr中的fields, 而
+  // Expr::multiplyReferencedFields_表示的则是同一个expr下多个子表达式都包含的fields. 
+  //
   for (const auto& field : multiplyReferencedFields_) {
     context.ensureFieldLoaded(field->index(context), rows);
   }
