@@ -1079,6 +1079,24 @@ void Expr::evalEncodings(
   if (deterministic_ && !skipFieldDependentOptimizations() &&
       context.peelingEnabled()) {
     bool hasFlat = false;
+    // 
+    // input vector的peeling, 会尽量从expr tree的最高层去进行common的peeling操作,
+    // 这样可以避免expr sub-tree做重复的peeling操作.
+    // 
+    // 比如对于expr#0(expr#1(Field#2, Field#3), expr#2(Field#1)), input vector形式为:
+    //         Field#1         Field#2                      Field#3  
+    // expr#0: DICT1(Flat3)    DICT1(DICT2(DICT3(Flat1)))   DICT1(DICT2(Flat2))
+    // expr#1:                 DICT1(DICT2(DICT3(Flat1)))   DICT1(DICT2(Flat2))
+    // expr#2: DICT1(Flat3)
+    //
+    // expr#0 执行peeling操作后, input vector形式变为:
+    //         Field#1         Field#2                      Field#3  
+    // expr#0: Flat3           DICT2(DICT3(Flat1))         DICT2(Flat2)
+    // expr#1:                 DICT2(DICT3(Flat1))         DICT2(Flat2)
+    // expr#2: Flat3
+    // 因此, 执行expr#1和expr#2时, 就不用再执行DICT1相关的peeling操作了. 当然, 对于expr#1
+    // 而言, 它还可以进一步执行DICT2相关的peeling操作.
+    //
     for (auto* field : distinctFields_) {
       if (isFlat(*context.getField(field->index(context)))) {
         hasFlat = true;
@@ -1086,6 +1104,7 @@ void Expr::evalEncodings(
       }
     }
 
+    // 当前的peeling实现, 没法支持flat和dict混合的场景 (见PeeledEncoding::peelInternal)
     if (!hasFlat) {
       VectorPtr wrappedResult;
       // Attempt peeling and bound the scope of the context used for it.

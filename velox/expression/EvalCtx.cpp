@@ -279,6 +279,9 @@ void EvalCtx::moveAppendErrors(EvalErrorsPtr& other) {
 
 const VectorPtr& EvalCtx::getField(int32_t index) const {
   const VectorPtr* field;
+  // 对于所有的input fields而言, Expr::peelEncodings保证要么全部被peel, 
+  // 要么一个也不peel, 因为它们的peeling操作, 使用的是相同的rows映射 (这就
+  // 要求多个input的dict wrapping是一样的, 这个感觉非常难满足).
   if (!peeledFields_.empty()) {
     field = &peeledFields_[index];
   } else {
@@ -438,6 +441,8 @@ ScopedFinalSelectionSetter::ScopedFinalSelectionSetter(
     : evalCtx_(evalCtx),
       oldFinalSelection_(*evalCtx.mutableFinalSelection()),
       oldIsFinalSelection_(*evalCtx.mutableIsFinalSelection()) {
+  // evalCtx.isFinalSelection()为true时, 说明当前执行环境没有发生在IF/ELSE
+  // 的分支之下, 此时evalctx.evalCtx.finalSelection_还没有初始化.
   if ((evalCtx.isFinalSelection() && checkCondition) || override) {
     *evalCtx.mutableFinalSelection() = finalSelection;
     *evalCtx.mutableIsFinalSelection() = false;

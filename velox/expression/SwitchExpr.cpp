@@ -175,6 +175,15 @@ void SwitchExpr::evalSpecialForm(
     VELOX_CHECK(localResult && localResult->size() >= rows.end());
   }
 
+  //
+  // 更好的做法是等到scopedFinalSelectionSetter退出作用域(即恢复之前的FinalSelection设置)
+  // 后, 再进行moveOrCopyResult. 当前不会有问题, 是因为不会进行嵌套覆盖FinalSelection, 即
+  // 能保证context.finalSelection()总是和最上层的IF/ELSE的FinalSelection一样. 
+  // 
+  // 而在执行最上层的IF/ELSE时, finalResult肯定是nullptr (如果不为nullptr, 那这里就有问题, 
+  // 因为下面的操作肯定会进行覆盖, 因为在上面的scopedFinalSelectionSetter的作用域下, 将导致
+  // context.resultShouldBePreserved(...)为false).
+  //
   context.moveOrCopyResult(localResult, rows, finalResult);
 }
 
