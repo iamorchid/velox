@@ -202,6 +202,9 @@ class DecodedVector {
       return bits::isBitNull(nulls_, 0);
     }
 
+    // hasExtraNulls_为false时, 说明wrapper没有新增nulls, 此时
+    // nulls_指向的是底层vector的null信息, 因此需要对idx进行转换.
+    // 参见: DecodedVector::setFlatNulls
     VELOX_DCHECK(indices_);
     return bits::isBitNull(nulls_, indices_[idx]);
   }

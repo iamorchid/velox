@@ -25,6 +25,7 @@
 
 namespace facebook::velox {
 
+// 匿名namespace, 里面定义的内容仅仅对当前文件可见
 namespace {
 struct DummyReleaser {
   void addRef() const {}
@@ -33,6 +34,12 @@ struct DummyReleaser {
 };
 } // namespace
 
+//
+// ConstantVector的创建，参考BaseVector.cpp中的wrapInConstant.
+//
+// 对于complex类型, T统一采用ComplexType, 数据的真实类型由type_来说明.
+// 参考ArrayDistinct.cpp中ArrayDistinctFunction的说明.
+//
 template <typename T>
 class ConstantVector final : public SimpleVector<T> {
  public:
@@ -68,8 +75,17 @@ class ConstantVector final : public SimpleVector<T> {
         value_(std::move(val)),
         isNull_(isNull),
         initialized_(true) {
+    
+    // [question]
+    // 对于isNullAt和mayHaveNulls方法，ConstantVector都有自己的
+    // 特殊实现，为啥这里还需要显式准备nulls_所需的buffer???
     makeNullsBuffer();
+    
     // Special handling for complex types
+    // [question]
+    // 对于complext类型, 为啥null的情况下也要准备valueVector_? 看起来是约定, 对于
+    // complex type的ConstantVector, 使用方总是默认valueVector存在的, 可以参考
+    // ArrayDistinctFunction处理constant encoding场景.
     if (type->size() > 0) {
       // Only allow null constants to be created through this interface.
       VELOX_CHECK(isNull_);
@@ -168,6 +184,7 @@ class ConstantVector final : public SimpleVector<T> {
 
   virtual const T valueAt(vector_size_t /*idx*/) const override {
     VELOX_DCHECK(initialized_);
+    // 这里会要求T不能为ComplextType
     SimpleVector<T>::checkElementSize();
     return value();
   }
@@ -297,7 +314,10 @@ class ConstantVector final : public SimpleVector<T> {
     VELOX_FAIL("addNulls not supported");
   }
 
+  // Returns true if value at specified index is null or contains null.
   bool containsNullAt(vector_size_t idx) const override {
+    // 对于ComplextType, 如果idx对应的row不为null, 那么还需要
+    // 进一步判断进一步判断是否包含为null的子元素.
     if constexpr (std::is_same_v<T, ComplexType>) {
       if (isNullAt(idx)) {
         return true;
@@ -424,6 +444,10 @@ class ConstantVector final : public SimpleVector<T> {
     BaseVector::distinctValueCount_ = isNull_ ? 0 : 1;
     const vector_size_t vectorSize = BaseVector::length_;
     BaseVector::nullCount_ = isNull_ ? vectorSize : 0;
+
+    // 对于ComplexType，不能简单地将valueVector_在index_处的元素复制给value_，
+    // 然后将其引用置为null。因为这很有可能仅仅是浅复制，一旦valueVector_被析构，
+    // value_引用的内容将不再有效。
     if (valueVector_->isScalar()) {
       auto simple = valueVector_->loadedVector()->as<SimpleVector<T>>();
       isNull_ = simple->isNullAt(index_);
@@ -431,6 +455,9 @@ class ConstantVector final : public SimpleVector<T> {
         value_ = simple->valueAt(index_);
         if constexpr (std::is_same_v<T, StringView>) {
           // Copy string value.
+          // 这里之所以需要进行copy，是因为下面会将valueVector_的引用释放。如果
+          // valueVector_后面被析构了，则ConstantVector中value_(此时它对应的
+          // 类型为StringView)引用的内存将非法。
           StringView* valuePtr = reinterpret_cast<StringView*>(&value_);
           setValue(std::string(valuePtr->data(), valuePtr->size()));
 
@@ -440,12 +467,20 @@ class ConstantVector final : public SimpleVector<T> {
           }
         }
       }
+
+      // 通过上面的逻辑可以看到，如果base vector懒加载未完成或者T对应ComplextType，
+      // ConstantVector会一直保持对base vector的引用。
       valueVector_ = nullptr;
     }
+    // else {
+    //   // 对于ComplexType类型的ConstantVector, 它的value_字段没有意义, 
+    //   // 即对应的是ComplexType value_ (不会赋值, 它的size为0)
+    // }
     makeNullsBuffer();
     initialized_ = true;
   }
 
+  // 参见ConstantVector.cpp中，对StringView的特化实现
   void setValue(const std::string& string) {
     BaseVector::inMemoryBytes_ += string.size();
     value_ = velox::to<decltype(value_)>(string);
@@ -458,6 +493,8 @@ class ConstantVector final : public SimpleVector<T> {
     if (!isNull_) {
       return;
     }
+    // BufferPtr的size是以byte为单位，下面allocate结束后，size为
+    // 8，resize后将size重置为1。
     BaseVector::nulls_ =
         AlignedBuffer::allocate<uint64_t>(1, BaseVector::pool());
     BaseVector::nulls_->setSize(1);

@@ -285,6 +285,7 @@ void FlatVector<T>::copyValuesAndNulls(
   }
 }
 
+// [star][vector] FlatVector<T>::copyRanges
 template <typename T>
 void FlatVector<T>::copyRanges(
     const BaseVector* source,
@@ -295,6 +296,10 @@ void FlatVector<T>::copyRanges(
   }
 
   source = source->loadedVector();
+
+  // 这里确保了source不会为RowVector, ArrayVector以及MapVector. 因为FlatVector
+  // 使用的TypeKind不可能为ROW, ARRAY或者MAP. 因此, 对于已经loaded source, 这里
+  // 基本可以确定为SimpleVector.
   VELOX_CHECK_EQ(BaseVector::typeKind(), source->typeKind());
 
   if constexpr (std::is_same_v<T, StringView>) {
@@ -316,14 +321,15 @@ void FlatVector<T>::copyRanges(
     acquireSharedStringBuffers(source);
   }
 
-  const uint64_t* sourceRawNulls = source->rawNulls();
+  // 如果本Vector和source vector都没有nulls, 那么null bits就不用操作了.
+  // 否则, 就需要对本Vector的null bits进行操作.
   uint64_t* rawNulls = const_cast<uint64_t*>(BaseVector::rawNulls_);
   if (source->mayHaveNulls()) {
     rawNulls = BaseVector::mutableRawNulls();
   }
 
-  // Allocate values buffer if not allocated yet. This may happen if vector
-  // contains only null values.
+  // Allocate values buffer if not allocated yet. This may happen if 
+  // vector contains only null values.
   if (!values_) {
     mutableRawValues();
   }
@@ -345,6 +351,7 @@ void FlatVector<T>::copyRanges(
                 sourceValues, sourceIndex, rawValues, targetIndex, count);
           });
     } else {
+      // rawValues()不是BaseVector的虚函数, 而是FlatVector特有的模版方法
       const T* sourceValues = flatSource->rawValues();
       applyToEachRange(
           ranges, [&](auto targetIndex, auto sourceIndex, auto count) {
@@ -363,15 +370,18 @@ void FlatVector<T>::copyRanges(
     }
 
     if (rawNulls) {
+      // 通过BaseVector::rawNulls()的注释可以知道, 除了FlatVector之外, 其他vector
+      // 类型不应该使用rawNulls_(这里已经明确知道source是FlatVector了).
+      const uint64_t* sourceRawNulls = source->rawNulls();
       if (sourceRawNulls) {
         BaseVector::copyNulls(rawNulls, sourceRawNulls, ranges);
       } else {
-        BaseVector::setNulls(rawNulls, ranges, false);
+        BaseVector::setNulls(rawNulls, ranges, false /* isNull */);
       }
     }
   } else if (source->isConstantEncoding()) {
     if (source->isNullAt(0)) {
-      BaseVector::setNulls(rawNulls, ranges, true);
+      BaseVector::setNulls(rawNulls, ranges, true /* isNull */);
       return;
     }
     auto constant = source->asUnchecked<ConstantVector<T>>();
@@ -392,6 +402,8 @@ void FlatVector<T>::copyRanges(
       BaseVector::setNulls(rawNulls, ranges, false);
     }
   } else {
+    // FlatVector和ConstantVector都是SimpleVector, 但上面针对这两种常见
+    // 的vector类型进行了特殊处理, 避免下执行虚函数.
     auto* sourceVector = source->asUnchecked<SimpleVector<T>>();
     uint64_t* rawBoolValues = nullptr;
     if constexpr (std::is_same_v<T, bool>) {
@@ -399,6 +411,7 @@ void FlatVector<T>::copyRanges(
     }
     applyToEachRow(ranges, [&](auto targetIndex, auto sourceIndex) {
       if (!source->isNullAt(sourceIndex)) {
+        // valueAt为SimpleVector的虚函数, 这种情况下函数调用性能较低
         auto sourceValue = sourceVector->valueAt(sourceIndex);
         if constexpr (std::is_same_v<T, bool>) {
           bits::setBit(rawBoolValues, targetIndex, sourceValue);
@@ -474,6 +487,8 @@ void FlatVector<T>::resize(vector_size_t newSize, bool setNotNull) {
   }
 }
 
+// rows用于指定上层会操作哪些行(即会往这些行写入数据), 因此这个函数中
+// 无需对rows中指定的行进行复制操作.
 template <typename T>
 void FlatVector<T>::ensureWritable(const SelectivityVector& rows) {
   auto newSize = std::max<vector_size_t>(rows.end(), BaseVector::length_);

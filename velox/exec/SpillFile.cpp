@@ -29,6 +29,7 @@ namespace {
 static const bool kDefaultUseLosslessTimestamp = true;
 } // namespace
 
+// static
 std::unique_ptr<SpillWriteFile> SpillWriteFile::create(
     uint32_t id,
     const std::string& pathPrefix,
@@ -125,6 +126,7 @@ SpillWriteFile* SpillWriterBase::ensureFile() {
     closeFile();
   }
   if (currentFile_ == nullptr) {
+    // 创建SpillWriteFile
     currentFile_ = SpillWriteFile::create(
         nextFileId_++,
         fmt::format("{}-{}", pathPrefix_, finishedFiles_.size()),

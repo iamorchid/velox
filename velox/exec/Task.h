@@ -1133,6 +1133,9 @@ class Task : public std::enable_shared_from_this<Task> {
   // unique or universally unique.
   const std::string taskId_;
 
+  // 当前task所在stage中的ID (一个stage可以由多个tasks并行执行), 用于识别
+  // 从上游tasks的那个OutputBuffer读取数据 (每个上游task会为下游tasks都提
+  // 供一个OutputBuffer).
   const int destination_;
 
   // The execution mode of the task. It is enforced that a task can only be
@@ -1163,7 +1166,7 @@ class Task : public std::enable_shared_from_this<Task> {
   // to pool_ must be defined after pool_, childPools_.
   std::shared_ptr<memory::MemoryPool> pool_;
 
-  // Keep driver and operator memory pools alive for the duration of the task
+  // Keep node and operator memory pools alive for the duration of the task
   // to allow for sharing vectors across drivers without copy.
   std::vector<std::shared_ptr<memory::MemoryPool>> childPools_;
 

@@ -208,6 +208,8 @@ uint64_t MemoryReclaimer::run(
   return reclaimedBytes;
 }
 
+// 对于kLeaf类型的MemoryPool, 使用的是Operator::MemoryReclaimer, 它会执行
+// op_->reclaimableBytes(...)来获取operator可回收的内存大小.
 bool MemoryReclaimer::reclaimableBytes(
     const MemoryPool& pool,
     uint64_t& reclaimableBytes) const {

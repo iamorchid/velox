@@ -74,7 +74,7 @@ HashTable<ignoreNullKeys>::HashTable(
       allowDuplicates,
       isJoinBuild,
       hasProbedFlag,
-      hashMode_ != HashMode::kHash,
+      hashMode_ != HashMode::kHash, // hasNormalizedKey
       pool);
   nextOffset_ = rows_->nextOffset();
 }
@@ -105,6 +105,7 @@ class ProbeState {
     row_ = row;
     bucketOffset_ = table.bucketOffset(hash);
     const auto tag = BaseHashTable::hashTag(hash);
+    // 构建一个向量, 让元素的每个值都为tag
     wantedTags_ = BaseHashTable::TagVector::broadcast(tag);
     group_ = nullptr;
     indexInTags_ = kNotSet;
@@ -120,6 +121,10 @@ class ProbeState {
     tagsInTable_ = BaseHashTable::loadTags(
         reinterpret_cast<uint8_t*>(table.table_), bucketOffset_);
     table.incrementTagLoads();
+
+    // 将向量bool(即xsimd::batch_bool)转成bit mask, 其中两个向量相等
+    // 的元素会在bit mask中对应1 (即这里通过向量计算, 快速判断预期tag所
+    // 处的位置).
     hits_ = simd::toBitMask(tagsInTable_ == wantedTags_);
     if (hits_) {
       loadNextHit<op>(table, firstKey);
@@ -187,6 +192,8 @@ class ProbeState {
         }
       }
 
+      // BaseHashTable::hashTag保证不为0, 因此emtpy > 0时, 说明当前bucket一定
+      // 存在available的slot(即没有被占用的slot).
       uint16_t empty = simd::toBitMask(tagsInTable_ == kEmptyGroup) & kFullMask;
       if (empty > 0) {
         if (op == Operation::kProbe) {
@@ -195,12 +202,18 @@ class ProbeState {
         if (op == Operation::kErase) {
           VELOX_FAIL("Erasing non-existing entry");
         }
+
+        // 只有当找到一个存在empty slots的bucket后(之前的hits_校验保证这个bucket不
+        // 会存在我们需要查找的entry), 才能确定当前HashTable中不存在我们要找的entry. 
+        // 此时, 我们才能使用之前的tombstone (为何引入tombstore, 可以深入理解下有关
+        // kTombstoneTag注释).
         if (indexInTags_ != kNotSet) {
           // We came to the end of the probe without a hit. We replace the first
           // tombstone on the way.
           --numTombstones;
           return insert(row_, insertBucketOffset + indexInTags_);
         }
+
         auto pos = bits::getAndClearLastSetBit(empty);
         return insert(row_, bucketOffset_ + pos);
       }
@@ -320,6 +333,7 @@ void HashTable<ignoreNullKeys>::storeRowPointer(
     reinterpret_cast<char**>(table_)[index] = row;
     return;
   }
+  // 此时, index 对应bucket中可用slot的索引 + bucketOffset_
   const int64_t offset = bucketOffset(index);
   auto* bucket = bucketAt(offset);
   const auto slotIndex = index & (sizeof(TagVector) - 1);
@@ -398,6 +412,7 @@ FOLLY_ALWAYS_INLINE void HashTable<ignoreNullKeys>::fullProbe(
               lookup.normalizedKeys[row];
         },
         [&](int32_t row, uint64_t index) {
+          // index 对应bucket中可用slot的索引 + bucketOffset_
           return isJoin ? nullptr : insertEntry(lookup, index, row);
         },
         numTombstones_,
@@ -410,6 +425,7 @@ FOLLY_ALWAYS_INLINE void HashTable<ignoreNullKeys>::fullProbe(
       0,
       [&](char* group, int32_t row) { return compareKeys(group, lookup, row); },
       [&](int32_t row, uint64_t index) {
+        // index 对应bucket中可用slot的索引 + bucketOffset_
         return isJoin ? nullptr : insertEntry(lookup, index, row);
       },
       numTombstones_,
@@ -445,6 +461,8 @@ void populateNormalizedKeys(HashLookup& lookup, int8_t sizeBits) {
   for (auto row : lookup.rows) {
     auto hash = hashes[row];
     keys[row] = hash; // NOLINT
+    // hash当前对应的是normalized key, 这里需要将其转成适合
+    // hash操作的hash key.
     hashes[row] = mixNormalizedKey(hash, sizeBits);
   }
 }
@@ -1123,6 +1141,10 @@ void HashTable<ignoreNullKeys>::insertForGroupBy(
             ~simd::toBitMask(
                 BaseHashTable::TagVector::batch_bool_type(tagsInTable)) &
             ProbeState::kFullMask;
+
+        // group-by在做rehash时, 每个group能够保证不会存在相同的keys, 
+        // 因此不可用考虑tag相同时进行keys比较并并对agg结果进行merge的
+        // 问题(otherTables_始终为空).
         if (free) {
           auto freeOffset = bits::getAndClearLastSetBit(free);
           storeRowPointer(offset + freeOffset, hash, groups[i]);
@@ -1167,6 +1189,7 @@ void HashTable<ignoreNullKeys>::pushNext(char* row, char* next) {
   nextRow(next) = previousNext;
 }
 
+// join场景用到, merge多个pipe的build table
 template <bool ignoreNullKeys>
 template <bool isNormailizedKeyMode>
 FOLLY_ALWAYS_INLINE void HashTable<ignoreNullKeys>::buildFullProbe(
@@ -1497,6 +1520,10 @@ void HashTable<ignoreNullKeys>::decideHashMode(
     hashers_[i]->cardinality(reservePct(), rangeSizes[i], distinctSizes[i]);
     distinctsWithReserve = safeMul(distinctsWithReserve, distinctSizes[i]);
     rangesWithReserve = safeMul(rangesWithReserve, rangeSizes[i]);
+
+    // 可以看到, 这一会优先尝试采用range模式, 这种模式计算hash key效率更高,
+    // 即通过value-min即可得到. 注意: bestWithReserve是由不同的hasher采
+    // 用各自最优的模式计算等到的.
     if (distinctSizes[i] == VectorHasher::kRangeTooLarge &&
         rangeSizes[i] != VectorHasher::kRangeTooLarge) {
       useRange[i] = true;
@@ -1511,6 +1538,7 @@ void HashTable<ignoreNullKeys>::decideHashMode(
     }
   }
 
+  // 采用kArray模式时, group keys和array index一一对应
   if (rangesWithReserve < kArrayHashMaxSize && !disableRangeArrayHash_) {
     std::fill(useRange.begin(), useRange.end(), true);
     capacity_ = setHasherMode(hashers_, useRange, rangeSizes, distinctSizes);
@@ -1524,12 +1552,16 @@ void HashTable<ignoreNullKeys>::decideHashMode(
     setHashMode(HashMode::kArray, numNew, spillInputStartPartitionBit);
     return;
   }
+
+  // 采用kNormalizedKey模式时, group keys和hash一一对应（hash通过每个key的
+  // range组合得到, 值范围比较大, 不适合作为array的index)
   if (rangesWithReserve != VectorHasher::kRangeTooLarge) {
     std::fill(useRange.begin(), useRange.end(), true);
     setHasherMode(hashers_, useRange, rangeSizes, distinctSizes);
     setHashMode(HashMode::kNormalizedKey, numNew, spillInputStartPartitionBit);
     return;
   }
+
   if (hashers_.size() == 1 && distinctsWithReserve > 10000) {
     // A single part group by that does not go by range or become an array
     // does not make sense as a normalized key unless it is very small.
@@ -1543,12 +1575,20 @@ void HashTable<ignoreNullKeys>::decideHashMode(
     setHashMode(HashMode::kArray, numNew, spillInputStartPartitionBit);
     return;
   }
+
+  // 上面的if检查, 保证了此时rangesWithReserve一定为kRangeTooLarge
   if (distinctsWithReserve == VectorHasher::kRangeTooLarge &&
       rangesWithReserve == VectorHasher::kRangeTooLarge) {
     setHashMode(HashMode::kHash, numNew, spillInputStartPartitionBit);
     return;
   }
+
   // The key concatenation fits in 64 bits.
+  // 走到这里, 说明distinctsWithReserve一定不为kRangeTooLarge, 但bestWithReserve
+  // 还是可能为kRangeTooLarge (因为bestWithReserve可能有rangeSize参与计算得到).
+  // 如果 bestWithReserve不为kRangeTooLarge,
+  // 则尝试将其他distinceSize替换为rangeSize, 否则,
+  // 全部hasher采用distinctSize来计算normalizeKey.
   if (bestWithReserve != VectorHasher::kRangeTooLarge) {
     enableRangeWhereCan(rangeSizes, distinctSizes, useRange);
   } else {
@@ -1754,6 +1794,10 @@ void HashTable<ignoreNullKeys>::prepareJoinTable(
   for (const auto& other : otherTables_) {
     numDistinct_ += other->rows()->numRows();
   }
+
+  // 下面总会执行rehash操作, 因为HashBuild operator并没有执行过setHashMode或者
+  // decideHashMode操作(构造函数中可能一开始将hashMode_初始化为kHash), 即当前情
+  // 况下, capacity_总是为0.
   if (!useValueIds) {
     if (hashMode_ != HashMode::kHash) {
       setHashMode(HashMode::kHash, 0, spillInputStartPartitionBit);
@@ -2134,6 +2178,7 @@ std::string BaseHashTable::RowsIterator::toString() const {
       rowContainerIterator_.toString());
 }
 
+// [star][HashTable] HashTable::prepareForGroupProbe
 template <bool ignoreNullKeys>
 void HashTable<ignoreNullKeys>::prepareForGroupProbe(
     HashLookup& lookup,
@@ -2178,6 +2223,7 @@ void HashTable<ignoreNullKeys>::prepareForGroupProbe(
     }
   }
 
+  // 将SelectivityVector中true对应的bits(即位图)转成具体的行号vector
   populateLookupRows(rows, lookup.rows);
 }
 
@@ -2206,6 +2252,8 @@ void HashTable<ignoreNullKeys>::prepareForJoinProbe(
     auto& hasher = hashers[i];
     if (mode != BaseHashTable::HashMode::kHash) {
       auto& key = input->childAt(hasher->channel());
+      // 如果某些probe行在build table的VectorHasher中找不到对应的valueId,
+      // 则这里会自动将这些行从SelectivityVector清除.
       hashers_[i]->lookupValueIds(
           *key, rows, lookup.scratchMemory, lookup.hashes);
     } else {
@@ -2213,6 +2261,7 @@ void HashTable<ignoreNullKeys>::prepareForJoinProbe(
     }
   }
 
+  // 将SelectivityVector中true对应的bits(即位图)转成具体的行号vector
   populateLookupRows(rows, lookup.rows);
 }
 

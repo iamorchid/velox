@@ -230,6 +230,7 @@ std::ostream& operator<<(std::ostream& out, const StopReason& reason) {
 }
 
 // static
+// [star][driver] Driver::enqueue (调度driver的入口)
 void Driver::enqueue(std::shared_ptr<Driver> driver) {
   process::ScopedThreadDebugInfo scopedInfo(
       driver->driverCtx()->threadDebugInfo);
@@ -238,6 +239,8 @@ void Driver::enqueue(std::shared_ptr<Driver> driver) {
   if (driver->closed_) {
     return;
   }
+  // 对于presto, 使用的是PrestoServer中初始化的driverExecutor_, 线程
+  // 数量参见PrestoServer::initializeThreadPools.
   driver->task()->queryCtx()->executor()->add(
       [driver]() { Driver::run(driver); });
 }
@@ -458,6 +461,12 @@ StopReason Driver::runInternal(
       closed_ ? StopReason::kTerminate : task()->enter(state_, now);
   if (stop != StopReason::kNone) {
     if (stop == StopReason::kTerminate) {
+      // 1) closed_为true时, 显然不用再调用close()
+      // 2) 否则, task正处于terminate过程中 (即task的terminateRequested_为true). 因为
+      //    当前driver不处于onThread, Task::terminate会调用driver的closeByTask函数. 
+      //    因此, 这里是不用执行close()操作. 
+      // 实际上, 2)应该走不到的, 因为task处于terminate时, stop将为kAlreadyTerminated.
+      //
       // ctx_ still has a reference to the Task. 'this' is not on
       // thread from the Task's viewpoint, hence no need to call
       // close().
@@ -477,12 +486,15 @@ StopReason Driver::runInternal(
         kMetricDriverQueueTimeMs, queuedTimeUs / 1'000);
   }
 
+  // CancelGuard中会执行Task::leave操作
   CancelGuard guard(self, task().get(), &state_, [&](StopReason reason) {
     // This is run on error or cancel exit.
     if (reason == StopReason::kTerminate) {
       ctx_->task->setError(
           makeException("Cancelled", __FILE__, __LINE__, __FUNCTION__));
     }
+
+    // 执行当前cb时, 还处于on-thread阶段
     close();
   });
 
@@ -495,6 +507,13 @@ StopReason Driver::runInternal(
     const int32_t numOperators = operators_.size();
     ContinueFuture future = ContinueFuture::makeEmpty();
 
+    // 这里用到了operator以下几个接口:
+    // 1) BlockingReason isBlocked(ContinueFuture* future) // 上游和下游node
+    // 2) bool needsInput() // 下游node
+    // 3) RowVectorPtr getOutput() // 上游node
+    // 4) void addInput(RowVectorPtr input) // 下游node
+    // 5) bool isFinished() // // 上游node
+    // 6) void noMoreInput() // 下游node
     for (;;) {
       for (int32_t i = numOperators - 1; i >= 0; --i) {
         stop = task()->shouldStop();
@@ -515,6 +534,19 @@ StopReason Driver::runInternal(
         // queuedTime we should update.
         curOperatorId_ = i;
 
+        //
+        // checkUnderArbitration是query级别的 (本节点可能运行了该query的多个tasks), 
+        // 当一个task要进行memory reclaim时, 会先进行Task::requestPause()并等待所有
+        // driver完成go off-thread, 此时该task中的on-thread driver可以在上面的if判
+        // 断(即task()->shouldStop()的返回值)中, 感知到task处于kPause状态. 但是query
+        // 中其他task的drivers还未执行到Task::requestPause, 因为一次仅对一个task进行
+        // memory reclaim, 而通过checkUnderArbitration可以感知到query要进行memory
+        // reclaim操作了。
+        // 
+        // 参考:
+        // 1) QueryCtx::MemoryReclaimer::reclaim
+        // 2) Task::MemoryReclaimer::reclaim
+        //
         if (FOLLY_UNLIKELY(checkUnderArbitration(&future))) {
           // Blocks the driver if the associated query is under memory
           // arbitration as it is very likely the driver run will trigger memory
@@ -528,6 +560,26 @@ StopReason Driver::runInternal(
           return blockDriver(self, i, std::move(future), blockingState, guard);
         }
 
+        // [star][driver] driver执行分析
+        //
+        // 1) 对于(i == 0)的情况(比如各种SourceOperator), isBlocked主要是因为暂时无法为下游的
+        //    operator提供数据 (内部数据堆积时, 不会反应到这个接口上, 这个是operator内部管理具体
+        //    需要预读多少数据).
+        //    而blocked解除, 则是由于上游task 或者 其他pipeline的output node提供了数据。
+        //
+        // 2) 对于(i == numOperators - 1)的情况 (比如PartitionedOutput/LocalPartition等), 
+        //    isBlocked则主要是因为operator内部堆积的数据过多(即下游没有及时取走数据). 这些算子的
+        //    needsInput通常最为true, driver通过isBlocked来判断是否需要执行addInput.
+        //    而blocked解除, 则是由于下游task 或者 其他pipeline的source node取走了数据。
+        //
+        // 3) 其他node基本不会出现blocked情况, driver通过needsInput来判断是否需要执行addInput.
+        //    这里的node不能因为数据堆积等原因而进入blocked状态. 否则driver挂起来后, 它的getOutput
+        //    得不到执行, 那怎么解除blocked状态呢? 
+        //
+        //    因此, driver如果返回了StopReason::kBlock, 那么他的blocked解除必须依赖其他task
+        //    或者当前task的其他pipeline的driver.
+        //
+        
         withDeltaCpuWallTimer(op, &OperatorStats::isBlockedTiming, [&]() {
           TestValue::adjust(
               "facebook::velox::exec::Driver::runInternal::isBlocked", op);
@@ -542,6 +594,7 @@ StopReason Driver::runInternal(
         }
 
         if (i < numOperators - 1) {
+          // 检查下游node是否需要从本node获取数据
           Operator* nextOp = operators_[i + 1].get();
 
           withDeltaCpuWallTimer(nextOp, &OperatorStats::isBlockedTiming, [&]() {
@@ -604,6 +657,7 @@ StopReason Driver::runInternal(
                   });
               // The next iteration will see if operators_[i + 1] has
               // output now that it got input.
+              // 这里将i回退到i+1 (i += 2; --i), 上面注释很有道理
               i += 2;
               continue;
             } else {
@@ -886,14 +940,18 @@ void Driver::finishBarrier() {
   ctx_->task->finishDriverBarrier();
 }
 
+// private
 void Driver::close() {
   if (closed_) {
     // Already closed.
     return;
   }
+
+  // 目前看起来, 执行到这里时, isOnThread()一定为true
   if (!isOnThread() && !isTerminated()) {
     LOG(FATAL) << "Driver::close is only allowed from the Driver's thread";
   }
+
   closeOperators();
   updateStats();
   closed_ = true;
@@ -901,8 +959,10 @@ void Driver::close() {
 }
 
 void Driver::closeByTask() {
+  // Task::enterForTerminateLocked会保证下面两个条件满足
   VELOX_CHECK(isOnThread());
   VELOX_CHECK(isTerminated());
+  
   closeOperators();
   updateStats();
   closed_ = true;
@@ -1113,11 +1173,17 @@ std::string Driver::toString() const {
   return out.str();
 }
 
+// 下面的逻辑比较难理解, 正常情况下, driver退出loop循环时, 会显式通过notThrown
+// 将isThrow_设置为false, 此时onTerminate_仅当task处于terminated时, 才会调用.
+// 通过onTerminate实现知道, 它会触发Task::setError.
+// 另外, 如果driver执行过程中抛出异常时, 则会先执行Task::setError, 然后再执行下
+// 面isThrow_为true时的逻辑, 后续其他感知到task处于terminated.
 Driver::CancelGuard::~CancelGuard() {
   bool onTerminateCalled{false};
   if (isThrow_) {
     // Runtime error. Driver is on thread, hence safe.
     state_->isTerminated = true;
+    // 应该使用onTerminate_(StopReason::kAlreadyTerminated) ?
     onTerminate_(StopReason::kNone);
     onTerminateCalled = true;
   }
@@ -1202,6 +1268,7 @@ StopReason Driver::blockDriver(
     std::shared_ptr<BlockingState>& blockingState,
     CancelGuard& guard) {
   auto* op = operators_[blockedOperatorId].get();
+  // 这里确保future不是被std::move后, 继续使用的future
   VELOX_CHECK(
       future.valid(),
       "The operator {} is blocked but blocking future is not valid",

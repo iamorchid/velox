@@ -737,6 +737,8 @@ class ScalarType : public CanProvideCustomComparisonType<KIND> {
   }
 };
 
+// 可以看到, 通过INTERGER(), BOOLEAN()等定义的创建的scalar类型实例, 其实都是单例.
+// 见Type.cpp文件中的VELOX_DEFINE_SCALAR_ACCESSOR(INTEGER)等定义.
 template <TypeKind KIND>
 const std::shared_ptr<const ScalarType<KIND>> ScalarType<KIND>::create() {
   static const auto instance = std::make_shared<const ScalarType<KIND>>();

@@ -38,7 +38,7 @@ class SpecialForm : public Expr {
   // This is safe to call only after all metadata is computed for input
   // expressions.
   virtual void computePropagatesNulls() {
-    VELOX_NYI();
+    VELOX_NYI(); // NYI: Not Yet Implemented
   }
 };
 } // namespace facebook::velox::exec

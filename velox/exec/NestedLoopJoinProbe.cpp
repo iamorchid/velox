@@ -443,6 +443,7 @@ void NestedLoopJoinProbe::prepareOutput() {
 
   std::vector<VectorPtr> localColumns(outputType_->size());
 
+  // 作为全局函数定义在BaseVector.h文件中
   probeOutputIndices_ = allocateIndices(outputBatchSize_, pool());
   rawProbeOutputIndices_ = probeOutputIndices_->asMutable<vector_size_t>();
 
@@ -483,6 +484,7 @@ void NestedLoopJoinProbe::evaluateJoinFilter(const RowVectorPtr& buildVector) {
       filterBuildProjections_);
 
   if (filterInputRows_.size() != filterInput->size()) {
+    // 调整SelectivityVector的大小, 并将所有bits设置为true
     filterInputRows_.resizeFill(filterInput->size(), true);
   }
   VELOX_CHECK(filterInputRows_.isAllSelected());

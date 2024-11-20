@@ -138,7 +138,7 @@ class Expr {
   ///
   /// @param parentExprSet pointer to the parent ExprSet which is calling
   /// evaluate on this expression. Should only be set for top level expressions
-  /// and not passed on to child expressions as it is ssed to setup exception
+  /// and not passed on to child expressions as it is used to setup exception
   /// context.
   void eval(
       const SelectivityVector& rows,
@@ -571,6 +571,7 @@ class Expr {
   // Used to determine pre-loading of lazy vectors at current expr.
   std::unordered_set<FieldReference*> multiplyReferencedFields_;
 
+  // TODO 支持propagatesNullFields_是不是粒度更精细些?
   // True if a null in any of 'distinctFields_' causes 'this' to be
   // null for the row.
   bool propagatesNulls_ = false;
@@ -597,6 +598,11 @@ class Expr {
     }
 
     bool operator<(const InputForSharedResults& other) const {
+      // When comparing std::vector objects that contain pointers, the 
+      // comparison will be based on the pointer values themselves rather 
+      // than the objects they point to. This means that two pointers 
+      // pointing to different memory addresses (even if they point to 
+      // the same value) will be considered different.
       return inputVectors_ < other.inputVectors_;
     }
 

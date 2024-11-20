@@ -196,8 +196,12 @@ void DecodedVector::combineWrappers(
   auto topEncoding = vector->encoding();
   T values;
   if (topEncoding == VectorEncoding::Simple::DICTIONARY) {
+    // vector->wrapInfo(): dict中的每一行同base vector中的行的映射关系（多对一）
     indices_ = vector->wrapInfo()->template as<vector_size_t>();
+    // vector->valueVector(): dict使用的base vector
     values = getValueVector(vector);
+    // dict本身的nulls信息，dict某一行是否为null，除了dict本身的nulls信息外，还依赖base vector的nulls信息。
+    // 参考：DictionaryVector-inl.h文件中的DictionaryVector<T>::isNullAt
     nulls_ = vector->rawNulls();
     if (nulls_) {
       hasExtraNulls_ = true;
@@ -215,6 +219,7 @@ void DecodedVector::combineWrappers(
         // We get the shared base vector only in case numLevels == -1.
         VELOX_UNREACHABLE();
       } else {
+        // 如果wrapper没有全部peel off的话, 则data_将为null.
         baseVector_ = values;
       }
       return;
@@ -257,6 +262,8 @@ void DecodedVector::applyDictionaryWrapper(
 
   auto newIndices = dictionaryVector.wrapInfo()->as<vector_size_t>();
   auto newNulls = dictionaryVector.rawNulls();
+  // 如果newNulls为null（表示dictionaryVector不存在null的行），则说明进行
+  // 当前merge的时候，可以直接复用上一次merge得到的nulls结果，而无需进行复制。
   if (newNulls) {
     hasExtraNulls_ = true;
     mayHaveNulls_ = true;
@@ -326,6 +333,8 @@ void DecodedVector::setFlatNulls(
     const BaseVector& vector,
     const SelectivityVector* rows) {
   if (hasExtraNulls_) {
+    // nulls_当前可能指向底层vector的null信息, 因此不能在DecodedVector
+    // 中对其进行修改, 这里必须进行copy-on-write.
     if (nullsNotCopied()) {
       copyNulls(end(rows));
     }
@@ -354,6 +363,8 @@ void DecodedVector::setBaseData(
     sharedBase = vector;
     baseVector_ = vector.get();
   } else {
+    // 所有wrapper都peel off后, 虽然这里会设置baseVector_, 但
+    // 调用后续基本只会用到data_, 见valueAt(idx)以及data().
     baseVector_ = vector;
   }
   switch (encoding) {
@@ -407,7 +418,17 @@ void DecodedVector::setBaseDataForConstant(
     });
     setFlatNulls(*vector, rows);
   }
+  //
+  // 对于ComplexType类型的ConstantVector, 它的value_字段没有意义, 
+  // 即对应的是ComplexType value_ (不会赋值, 它的size为0). 
+  // 参考: setInternalState in ConstantVector.h
+  // 
+  // 另外, 对于type为ComplexType的情况下, 不应该使用data_以及data_
+  // 相关的函数, 因为它的值是没有意义的.
+  //
   data_ = vector->valuesAsVoid();
+ 
+  // 这里再次判断是多余的, 上面的if/else操作已经设置好了nulls_
   if (!nulls_) {
     nulls_ = vector->isNullAt(0) ? &constantNullMask_ : nullptr;
   }
@@ -490,6 +511,8 @@ const uint64_t* DecodedVector::nulls(const SelectivityVector* rows) {
   }
 
   if (hasExtraNulls_) {
+    // 由setBaseData以及setFlatNulls知道, 此时nulls_已经将wrapper中
+    // 的nulls以及base vector的nulls进行过merge了.
     allNulls_ = nulls_;
   } else if (!nulls_ || size_ == 0) {
     allNulls_ = nullptr;
@@ -501,7 +524,14 @@ const uint64_t* DecodedVector::nulls(const SelectivityVector* rows) {
       copiedNulls_.resize(bits::nwords(size_), bits::kNull64);
       allNulls_ = copiedNulls_.data();
     } else {
-      // Copy base nulls.
+      // wrapper本身没有定义nulls, 此时nulls_指向的base vector的raw nulls.
+      // 但这里需要最上层wrapper对外nulls, 因此需要进行映射. 比如wrapper和底层
+      // base vector的index映射关系为：
+      // 0 -> 1, 1 -> 3, 2 -> 0, 3 -> 0, 4 -> 2, 5 -> 1
+      // 假设base vector的nulls为: 
+      // 1 0 1 0
+      // 则decoded后, 最上层的wrapper对外的nulls(rows为[0, 1, 2, 3, 4, 5])为:
+      // 0 0 1 1 1 0
       copiedNulls_.resize(bits::nwords(size_));
       auto* rawCopiedNulls = copiedNulls_.data();
       VELOX_CHECK(
@@ -515,6 +545,8 @@ const uint64_t* DecodedVector::nulls(const SelectivityVector* rows) {
       VELOX_DEBUG_ONLY const auto baseSize = baseVector_->size();
       applyToRows(rows, [&](auto i) {
         VELOX_DCHECK_LT(indices_[i], baseSize);
+        // 上面resize后, rawCopiedNulls的所有数据都为0(即所有行都为null),
+        // 这里需要对指定的rows, 设置正确的nulls.
         bits::setNull(rawCopiedNulls, i, bits::isBitNull(nulls_, indices_[i]));
       });
       allNulls_ = copiedNulls_.data();

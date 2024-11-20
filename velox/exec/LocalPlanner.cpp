@@ -197,6 +197,7 @@ OperatorSupplier makeOperatorSupplier(
   return Operator::operatorSupplierFromPlanNode(planNode);
 }
 
+// [star][plan] detail::plan
 void plan(
     const std::shared_ptr<const core::PlanNode>& planNode,
     std::vector<std::shared_ptr<const core::PlanNode>>* currentPlanNodes,
@@ -221,11 +222,30 @@ void plan(
           sources[i],
           mustStartNewPipeline(planNode, i) ? nullptr : currentPlanNodes,
           planNode,
+          // 对于start new pipeline的场景, 这个比较好理解, 即创建能够从新pipeline消费
+          // 数据的Operator (作为新pipeline的最后一个Operator, 见createDriver). 这
+          // 个Operator负责往内存中的queues中写入数据, 下游pipeline的drivers会消费对应
+          // 的queue.
           makeOperatorSupplier(planNode),
           driverFactories);
     }
   }
 
+  // 这里可以看到, DriverFactory中的planNodes是按照source依赖反序存放的, 即假设plan中的顺序是: 
+  // PartitionedOutputNode -> AggregationNode -> LocalPartitionNode -> ExchangeNode
+  // 则会生成如下两个operator pipelines:
+  // DriverFactory#1: 
+  //  planNodes: [LocalPartitionNode, AggregationNode, PartitionedOutputNode]
+  //  operators: [LocalExchange, HashAggregation, PartitionedOutput]
+  // DriverFactory#2: 
+  //  planNodes: [ExchangeNode]
+  //  operators: [Exchange, LocalPartition]
+  //
+  // 其中, DriverFactory#2中的算子LocalPartition是基于consumerSupplier动态生成出来的.
+  // 
+  // 说明: velox中LocalPartitionNode对应presto中的local ExchangeNode, 而ExchangeNode则对应
+  // remote ExchangeNode. 另外, PartitionedOutputNode和plan中的node没有对应关系, 而是基于plan
+  // 中的partitioning scheme动态生成, 参考: VeloxQueryPlanConverterBase::toVeloxQueryPlan.
   currentPlanNodes->push_back(planNode);
 }
 

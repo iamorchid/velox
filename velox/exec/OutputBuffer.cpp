@@ -116,6 +116,10 @@ DestinationBuffer::Data DestinationBuffer::getData(
     ArbitraryBuffer* arbitraryBuffer) {
   VELOX_CHECK_GE(
       sequence, sequence_, "Get received for an already acknowledged item");
+
+  // 通过maybeLoadData可以知道, 采用ArbitraryBuffer时, 如果对应的destination
+  // 没有pending的getData请求时, 是不会主动往 DestinationBuffer 的queue中投放
+  // SerializedPage 的. 因此, 这里需要尝试从ArbitraryBuffer加载下pages.
   if (arbitraryBuffer != nullptr) {
     loadData(arbitraryBuffer, maxBytes);
   }
@@ -126,6 +130,7 @@ DestinationBuffer::Data DestinationBuffer::getData(
               << sequence_ << " Setting second notify " << notifySequence_
               << " / " << sequence;
     }
+    
     if (maxBytes == 0) {
       std::vector<int64_t> remainingBytes;
       if (arbitraryBuffer) {
@@ -134,10 +139,15 @@ DestinationBuffer::Data DestinationBuffer::getData(
       if (!remainingBytes.empty()) {
         return {{}, std::move(remainingBytes), true};
       }
+      // 仍然hold住请求(不立即响应), 尽可能等待一段时间以便将有用的信息
+      // 返回, 比如是否结束, 更新后的remainingBytes等.
     }
+    
     notify_ = std::move(notify);
     aliveCheck_ = std::move(activeCheck);
     if (sequence - sequence_ > data_.size()) {
+      // 这里看起来是BUG, 会导致 notifySequence_ 为0, 下次使用notifySequence_
+      // 进行DestinationBuffer::getData操作时, 将会break上面的VELOX_CHECK_GE.
       notifySequence_ = std::min(notifySequence_, sequence);
     } else {
       notifySequence_ = sequence;
@@ -148,6 +158,9 @@ DestinationBuffer::Data DestinationBuffer::getData(
 
   std::vector<std::unique_ptr<folly::IOBuf>> data;
   uint64_t resultBytes = 0;
+  // seq以page为单位, i表示当前内存中有多少个page已经被确认接受了. 但是在调用
+  // getData之前, 通常会先执行DestinationBuffer::getData, 因此这里的i通常
+  // 为0.
   auto i = sequence - sequence_;
   if (maxBytes > 0) {
     for (; i < data_.size(); ++i) {
@@ -179,6 +192,8 @@ DestinationBuffer::Data DestinationBuffer::getData(
   if (!atEnd && arbitraryBuffer) {
     arbitraryBuffer->getAvailablePageSizes(remainingBytes);
   }
+  // 这里data.empty()不需要考虑, remainingBytes.empty() && atEnd 满足的情况下, 
+  // 已经决定后续getData不会返回更多结果了, 可以告诉client已经达到end了。
   if (data.empty() && remainingBytes.empty() && atEnd) {
     data.push_back(nullptr);
   }
@@ -227,14 +242,20 @@ void DestinationBuffer::finish() {
 
 void DestinationBuffer::maybeLoadData(ArbitraryBuffer* buffer) {
   VELOX_CHECK(!buffer->empty() || buffer->hasNoMoreData());
+  
+  // 采用ArbitraryBuffer时, 如果当前destination没有pending的getData请求,
+  // 则不用往它的queue中投放pages, 因为其他destination可能更合适.
   if (notify_ == nullptr) {
     return;
   }
+
   if (aliveCheck_ != nullptr && !aliveCheck_()) {
     // Skip load data to an inactive destination buffer.
     clearNotify();
     return;
   }
+
+  // 这里即使投放pages, 也严格按照pending getData请求的需要来限制.
   loadData(buffer, notifyMaxBytes_);
 }
 
@@ -473,6 +494,8 @@ bool OutputBuffer::enqueue(
         break;
     }
 
+    // 这里的bufferedBytes_是同一个task的所有destinations以及所有drivers共用的. 
+    // promises_采用vector, 主要是考虑到多driver并发往destinations写数据的情况.
     if (bufferedBytes_ >= maxSize_ && future) {
       common::testutil::TestValue::adjust(
           "facebook::velox::exec::OutputBuffer::enqueue", this);
@@ -522,6 +545,9 @@ void OutputBuffer::enqueueArbitraryOutputLocked(
   VELOX_CHECK(!arbitraryBuffer_->hasNoMoreData());
 
   arbitraryBuffer_->enqueue(std::move(data));
+
+  // 这里可以看到, ArbitraryOutput 本质上上是以Round Robin的方式
+  // 往各个 destination 添加 SerializedPage.
   VELOX_CHECK_LT(nextArbitraryLoadBufferIndex_, buffers_.size());
   int32_t bufferId = nextArbitraryLoadBufferIndex_;
   for (int32_t i = 0; i < buffers_.size();
@@ -530,10 +556,14 @@ void OutputBuffer::enqueueArbitraryOutputLocked(
       nextArbitraryLoadBufferIndex_ = bufferId;
       break;
     }
+
+  // buffer为null时, 说明该 bufferId 对应的下有task已经执行过
+  // OutputBuffer::deleteResults
     auto* buffer = buffers_[bufferId].get();
     if (buffer == nullptr) {
       continue;
     }
+
     buffer->maybeLoadData(arbitraryBuffer_.get());
     dataAvailableCbs.emplace_back(buffer->getAndClearNotify());
   }
@@ -548,6 +578,9 @@ void OutputBuffer::enqueuePartitionedOutputLocked(
   VELOX_DCHECK(dataAvailableCbs.empty());
 
   VELOX_CHECK_LT(destination, buffers_.size());
+
+  // buffer为null时, 说明该 destination 对应的下有task已经执行过
+  // OutputBuffer::deleteResults
   auto* buffer = buffers_[destination].get();
   if (buffer != nullptr) {
     buffer->enqueue(std::move(data));
@@ -665,6 +698,7 @@ void OutputBuffer::updateAfterAcknowledgeLocked(
   }
   VELOX_CHECK_GT(freedBytes, 0);
 
+  // 这里会去更新bufferedBytes_以及bufferedPages_
   updateStatsWithFreedPagesLocked(freedPages, freedBytes);
 
   if (bufferedBytes_ < continueSize_) {
@@ -722,6 +756,7 @@ void OutputBuffer::getData(
   {
     std::lock_guard<std::mutex> l(mutex_);
 
+    // 看起来非partitioned的情况下(比如broadcast), 可以动态加入destination
     if (!isPartitioned() && destination >= buffers_.size()) {
       addOutputBuffersLocked(destination + 1);
     }
@@ -741,6 +776,9 @@ void OutputBuffer::getData(
     }
   }
   releaseAfterAcknowledge(freed, promises);
+
+  // immediate为true, 表示上面的getData操作获取到了result (因为上面的getData
+  // 操作是在持锁的情况下进行的, 因此不能那时执行notify).
   if (data.immediate) {
     notify(std::move(data.data), sequence, std::move(data.remainingBytes));
   }

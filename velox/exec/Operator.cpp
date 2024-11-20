@@ -759,6 +759,9 @@ uint64_t Operator::MemoryReclaimer::reclaim(
       driver->state().suspended(),
       driver->state().isTerminated,
       pool->name());
+  
+  // Task::MemoryReclaimer::reclaim保证, 在执行后续pool的reclaim操作之前,
+  // task->pauseRequested()先完成.
   VELOX_CHECK(driver->task()->pauseRequested());
 
   TestValue::adjust(

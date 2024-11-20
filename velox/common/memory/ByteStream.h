@@ -455,6 +455,7 @@ class ByteOutputStream {
  private:
   // Returns a range of 'size' items of T. If there is no contiguous space in
   // 'this', uses 'scratch' to make a temp block that is appended to 'this' in
+  // AppendWindow::~AppendWindow.
   template <typename T>
   uint8_t* getAppendWindow(int32_t size, ScratchPtr<T>& scratchPtr) {
     const int32_t bytes = sizeof(T) * size;
@@ -466,10 +467,14 @@ class ByteOutputStream {
       current_->position += bytes;
       return current_->buffer + current_->position - bytes;
     }
-    // If the tail is not large enough, make  temp of the right size
-    // in scratch. Extend the stream so that there is guaranteed space to copy
-    // the scratch to the stream. This copy takes place in destruction of
-    // AppendWindow and must not allocate so that it is noexcept.
+    // If the tail is not large enough, make temp of the right size in scratch. 
+    // Extend the stream so that there is guaranteed space to copy the scratch 
+    // to the stream. This copy takes place in destruction of AppendWindow and 
+    // must not allocate so that it is noexcept.
+    //
+    // 之所以需要这么做, 是因为ByteOutputStream数据是由多段不连续的ByteRange组成的. 
+    // 而外部使用方在进行内存copy时, 希望操作连续的内存(更简单).
+    //
     ensureSpace(bytes);
     return reinterpret_cast<uint8_t*>(scratchPtr.get(size));
   }

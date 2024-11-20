@@ -56,6 +56,7 @@ SwitchExpr::SwitchExpr(
       this->type()->toString());
 }
 
+// [star][expr] SwitchExpr::evalSpecialForm
 void SwitchExpr::evalSpecialForm(
     const SelectivityVector& rows,
     EvalCtx& context,
@@ -66,17 +67,22 @@ void SwitchExpr::evalSpecialForm(
   LocalSelectivityVector thenRows(context);
 
   // SWITCH: fix finalSelection at "rows" unless already fixed
+  // 关于如何使用final selection，参考EvalCtx.h中的moveOrCopyResult方法
   ScopedFinalSelectionSetter scopedFinalSelectionSetter(context, &rows);
   if (propagatesNulls_) {
     // If propagates nulls, we load lazies before conditions so that we can
-    // avoid errors for null rows. Null propagation is on only if all thens and
-    // else load access the same vectors, so there is no extra loading.
+    // avoid errors for null rows. Null propagation is on only if all thens
+    // and else load the same vectors, so there is no extra loading.
     auto& remaining = *remainingRows.get();
     for (auto* field : distinctFields_) {
       context.ensureFieldLoaded(field->index(context), remaining);
       const auto& vector = context.getField(field->index(context));
       if (vector->mayHaveNulls()) {
         LocalDecodedVector decoded(context, *vector, remaining);
+        // [question]
+        // localResult初始值为null, 则addNulls会导致localResult初始化为ConstantVector.
+        // 后面eval时, 对localResult进行更新不会报错吗? 不会，因为在对localResult进行更新前, 
+        // 会调用BaseVector::ensureWritable.
         addNulls(remaining, decoded->nulls(&remaining), context, localResult);
         remaining.deselectNulls(
             decoded->nulls(&remaining), remaining.begin(), remaining.end());
@@ -169,14 +175,26 @@ void SwitchExpr::evalSpecialForm(
     VELOX_CHECK_GE(localResult->size(), rows.end());
   }
 
+  //
+  // 更好的做法是等到scopedFinalSelectionSetter退出作用域(即恢复之前的FinalSelection设置)
+  // 后, 再进行moveOrCopyResult. 当前不会有问题, 是因为不会进行嵌套覆盖FinalSelection, 即
+  // 能保证context.finalSelection()总是和最上层的IF/ELSE的FinalSelection一样. 
+  // 
+  // 而在执行最上层的IF/ELSE时, finalResult肯定是nullptr (如果不为nullptr, 那这里就有问题, 
+  // 因为下面的操作肯定会进行覆盖, 因为在上面的scopedFinalSelectionSetter的作用域下, 将导致
+  // context.resultShouldBePreserved(...)为false).
+  //
   context.moveOrCopyResult(localResult, rows, finalResult);
 }
 
 // This is safe to call only after all metadata is computed for input
 // expressions.
 void SwitchExpr::computePropagatesNulls() {
-  // The "switch" expression propagates nulls when all of the following
-  // conditions are met:
+  //
+  // 前两个条件比较好理解, 而对于第三个条件, condition的inputs是否为null, 并不能
+  // 决定output为null (比如isNull), 只能决定condition为true/false.
+  //
+  // The "switch" expression propagates nulls when all of the following conditions are met:
   // - All "then" clauses and optional "else" clause propagate nulls.
   // - All "then" clauses and optional "else" clause use the same inputs.
   // - All "condition" clauses use a subset of "then"/"else" inputs.

@@ -191,6 +191,7 @@ void Expr::clearMetaData() {
   sameAsParentDistinctFields_ = false;
 }
 
+// static
 void Expr::mergeFields(
     std::vector<FieldReference*>& distinctFields,
     std::unordered_set<FieldReference*>& multiplyReferencedFields,
@@ -220,6 +221,7 @@ bool Expr::isCurrentFunctionDeterministic() const {
   }
 }
 
+// [star][expr] Expr::computeMetadata()
 void Expr::computeMetadata() {
   if (metaDataComputed_) {
     return;
@@ -273,8 +275,12 @@ void Expr::computeMetadata() {
         }
       }
 
-      // propagatesNulls_ is true if nonNullPropagating is subset of
-      // nullPropagating.
+      // 
+      // 这里的思路是: 只要保证nullPropagating是nonNullPropagating的超级, 对于任意一个存
+      // 在null的field, 我们都会至少有一个对应的input expr满足propagatesNulls. 当前expr
+      // 如果依赖多个inputs, 只要存在一个input为null, 当前expr就会为null.
+      //
+      // propagatesNulls_ is true if nonNullPropagating is subset of nullPropagating.
       propagatesNulls_ = true;
       for (auto* field : nonNullPropagating) {
         if (!nullPropagating.count(field)) {
@@ -364,6 +370,8 @@ bool Expr::evalArgsDefaultNulls(
 
   inputValues_.resize(inputs_.size());
   {
+    // 各个input本身无法决定是否抛出异常，同时需要依赖上层的expr怎么
+    // 定义context.throwOnError()。
     ScopedVarSetter throwErrors(
         context.mutableThrowOnError(), throwArgumentErrors(context));
 
@@ -377,6 +385,7 @@ bool Expr::evalArgsDefaultNulls(
       }
       // A null with no error deselects the row.
       // An error adds itself to argument errors.
+      // 设置error相关的操作可以参考：EvalCtx::setVeloxExceptionError
       if (context.errors()) {
         // There are new errors.
         context.ensureErrorsVectorSize(rows.rows().end());
@@ -409,9 +418,13 @@ bool Expr::evalArgsDefaultNulls(
   // Default-null behavior has taken place if rows has changed.
   stats_.defaultNullRowsSkipped |= rows.hasChanged();
 
+  // 此时，所有的inputs都计算完成，如果存在某一行不为null 且 存在错误，
+  // 则context.throwOnError() 为true时，将会抛出异常。
   mergeOrThrowArgumentErrors(
       rows.rows(), originalErrors, argumentErrors, context);
 
+  // 很显然，如果存在errors还能走到这里，说明context.throwOnError()
+  // 肯定为false。因此，下面的操作会忽略错误的行。
   if (!rows.deselectErrors()) {
     releaseInputValues(context);
     setAllNulls(rows.originalRows(), context, result);
@@ -481,7 +494,7 @@ void Expr::evalSimplifiedImpl(
     const SelectivityVector& rows,
     EvalCtx& context,
     VectorPtr& result) {
-  // Handle special form expressions.
+  // Handle special form expressions (参考ConstantExpr.cpp).
   if (isSpecialForm()) {
     evalSpecialFormSimplified(rows, context, result);
     return;
@@ -764,6 +777,7 @@ void Expr::evalFlatNoNullsImpl(
   }
 }
 
+// [star][expr] Expr::eval
 void Expr::eval(
     const SelectivityVector& rows,
     EvalCtx& context,
@@ -815,6 +829,23 @@ void Expr::eval(
   // different subset.
   //
   // TODO: Re-work the logic of deciding when to load which field.
+
+  //
+  // 通过Expr::evalEncodings中的peeling处理逻辑可以知道, 当LazyVector没有loaded时,
+  // 是不会对vector进行peel操作的. 因此, 第一次执行公共子表达式时, 会使用没有peel处理过
+  // 的vector. 而第二次执行改公共子表达式时, 因为第一次执行时已经load过了, 则后续可能使用
+  // peel过的vector, 进而导致无法命中公共子表达式的cache. 
+  // 
+  // 公共子表达式分为两种情况 ():
+  // case#1: select f2(IF(cond, f1(input1, input2))), f3(IF(cond, f1(input1, input2))), ...
+  // case#2: select f2(IF(cond, f1(input1, input2))) + f3(IF(cond, f1(input1, input2))), ...
+  // 对于case#1, 因为公共子表达式IF(cond, f1(input1, input2))存在于两个顶层的expr中,
+  // ExprSet::eval会保证总是load input1和input2对应的LazyVector。
+  // 对于case#2, 上述公共子表达式仅仅出现在单个顶层expr中, 它的提前加载需要在Expr::eval中处理.
+  // 
+  // 注意, compileExpressions保证了公共子表达式的子表达式不会表示为isMultiplyReferenced_,
+  // 即不会作为shared, 因为缓存它们没有任何意义 (缓存parent expr就够了).
+  //
   if (!hasConditionals_ || distinctFields_.size() == 1 ||
       shouldEvaluateSharedSubexp(context) ||
       !context.deferredLazyLoadingEnabled()) {
@@ -822,12 +853,21 @@ void Expr::eval(
     for (auto* field : distinctFields_) {
       context.ensureFieldLoaded(field->index(context), rows);
     }
+  // 走到这里意味着满足:
+  // 1. 当前expr包含conditionals (即为IF/ELSE 或者 CASE/WHEN, 或者 ConjunctExpr)
+  // 2. input fields肯定超过一个
+  // 3. 不是公共子表达式
+  // 4. 开启了LazyVector的延迟加载
   } else if (
       !propagatesNulls_ && !evaluatesArgumentsOnNonIncreasingSelection()) {
     // Load multiply-referenced fields at common parent expr with "rows".
     // Delay loading fields that are not in multiplyReferencedFields_.  In
     // case evaluatesArgumentsOnNonIncreasingSelection() is true, this is
     // delayed until we process the inputs of ConjunctExpr.
+    //
+    // 这里的Expr::multiplyReferencedFields_表示的是同一个expr下多个子表达式都包含的fields,
+    // 而ExprSet::multiplyReferencedFields_则指出现在多个顶层expr中的fields.
+    //
     for (const auto& field : multiplyReferencedFields_) {
       context.ensureFieldLoaded(field->index(context), rows);
     }
@@ -888,6 +928,8 @@ void Expr::evaluateSharedSubexpr(
     }
   }
 
+  // 这里采用了C++ 17的结构化绑定（structured binding）特性，将
+  // struct类型的value绑定到多个变量。
   auto& [sharedSubexprRows, sharedSubexprValues] =
       sharedSubexprResultsIter->second;
 
@@ -935,6 +977,13 @@ void Expr::evaluateSharedSubexpr(
   LocalSelectivityVector newFinalSelectionHolder(context, *sharedSubexprRows);
   auto* newFinalSelection = newFinalSelectionHolder.get();
   newFinalSelection->select(*missingRows);
+
+  // 这里需要考虑context.finalSelection()，是因为下面会进行：
+  // context.moveOrCopyResult(sharedSubexprValues, rows, result);
+  //
+  // 如果这里不考虑context.isFinalSelection()，则会导致覆盖result中已有的结果。
+  // 但感觉更好的做法应该是限制下面ScopedFinalSelectionSetter作用域，使它仅仅
+  // 影响eval(*missingRows, context, sharedSubexprValues)。
   if (!context.isFinalSelection()) {
     newFinalSelection->select(*context.finalSelection());
   }
@@ -1052,6 +1101,24 @@ void Expr::evalEncodings(
   if (deterministic_ && !skipFieldDependentOptimizations() &&
       context.peelingEnabled()) {
     bool hasFlat = false;
+    // 
+    // input vector的peeling, 会尽量从expr tree的最高层去进行common的peeling操作,
+    // 这样可以避免expr sub-tree做重复的peeling操作.
+    // 
+    // 比如对于expr#0(expr#1(Field#2, Field#3), expr#2(Field#1)), input vector形式为:
+    //         Field#1         Field#2                      Field#3  
+    // expr#0: DICT1(Flat3)    DICT1(DICT2(DICT3(Flat1)))   DICT1(DICT2(Flat2))
+    // expr#1:                 DICT1(DICT2(DICT3(Flat1)))   DICT1(DICT2(Flat2))
+    // expr#2: DICT1(Flat3)
+    //
+    // expr#0 执行peeling操作后, input vector形式变为:
+    //         Field#1         Field#2                      Field#3  
+    // expr#0: Flat3           DICT2(DICT3(Flat1))         DICT2(Flat2)
+    // expr#1:                 DICT2(DICT3(Flat1))         DICT2(Flat2)
+    // expr#2: Flat3
+    // 因此, 执行expr#1和expr#2时, 就不用再执行DICT1相关的peeling操作了. 当然, 对于expr#1
+    // 而言, 它还可以进一步执行DICT2相关的peeling操作.
+    //
     for (auto* field : distinctFields_) {
       if (isFlat(*context.getField(field->index(context)))) {
         hasFlat = true;
@@ -1059,6 +1126,7 @@ void Expr::evalEncodings(
       }
     }
 
+    // 当前的peeling实现, 没法支持flat和dict混合的场景 (见PeeledEncoding::peelInternal)
     if (!hasFlat) {
       VectorPtr wrappedResult;
       // Attempt peeling and bound the scope of the context used for it.
@@ -1115,6 +1183,7 @@ bool Expr::removeSureNulls(
     }
 
     if (values->mayHaveNulls()) {
+      // 这里decode目的是为了对multiple layers of nulls进行合并
       LocalDecodedVector decoded(context, *values, rows);
       if (auto* rawNulls = decoded->nulls(&rows)) {
         if (!result) {
@@ -1125,6 +1194,9 @@ bool Expr::removeSureNulls(
       }
     }
   }
+
+  // result不为nullptr，说明存在某些行被置为null。另外，result被
+  // 封装在nullHolder中，调用方通过nullHolder.get()获取。
   if (result) {
     result->updateBounds();
     // Default-null behavior has taken place if some sure nulls has been
@@ -1146,6 +1218,7 @@ void Expr::addNulls(
 }
 
 void Expr::evalWithNulls(
+    // rows是ExprSet中多个Expr公用的，这里不能被修改（采用const）
     const SelectivityVector& rows,
     EvalCtx& context,
     VectorPtr& result) {
@@ -1170,12 +1243,16 @@ void Expr::evalWithNulls(
 
     if (mayHaveNulls) {
       LocalSelectivityVector nonNullHolder(context);
+      // 当rows中某些行被设置为null（inputs中存在null的行），这里会返回true
       if (removeSureNulls(rows, context, nonNullHolder)) {
         ScopedVarSetter noMoreNulls(context.mutableNullsPruned(), true);
         if (nonNullHolder.get()->hasSelections()) {
           evalAll(*nonNullHolder.get(), context, result);
         }
         auto rawNonNulls = nonNullHolder.get()->asRange().bits();
+
+        // result可能包含rows之外的结果(比如已经填充的partial结果), 这里
+        // 设置null时, 必须通过rows来限定操作范围.
         addNulls(rows, rawNonNulls, context, result);
         return;
       }
@@ -1297,6 +1374,7 @@ void Expr::evalWithMemo(
   context.releaseVector(base);
 }
 
+// 将rows选中的行全部置为null
 void Expr::setAllNulls(
     const SelectivityVector& rows,
     EvalCtx& context,
@@ -1932,6 +2010,10 @@ void ExprSet::eval(
   // If b is a LazyVector and f(a) AND g(b) expression is evaluated first, it
   // will load b only for rows where f(a) is true. However, h(b) projection
   // needs all rows for "b".
+  //
+  // 这里的ExprSet::multiplyReferencedFields_, 是指出现在多个顶层expr中的fields, 而
+  // Expr::multiplyReferencedFields_表示的则是同一个expr下多个子表达式都包含的fields. 
+  //
   for (const auto& field : multiplyReferencedFields_) {
     context.ensureFieldLoaded(field->index(context), rows);
   }

@@ -147,11 +147,15 @@ void HashBuild::setupTable() {
   } else {
     // (Left) semi and anti join with no extra filter only needs to know whether
     // there is a match. Hence, no need to store entries with duplicate keys.
+    // 参见HashProbe::getOutputInternal如何基于这个进行优化
     const bool dropDuplicates = !joinNode_->filter() &&
         (joinNode_->isLeftSemiFilterJoin() ||
          joinNode_->isLeftSemiProjectJoin() || isAntiJoin(joinType_));
     // Right semi join needs to tag build rows that were probed.
     const bool needProbedFlag = joinNode_->isRightSemiFilterJoin();
+
+    // 对于没有定义filter的场景, HashTable可以忽略key为null的build rows. 因为这种情况下, 
+    // HashProbe使用HashBuild记录的joinHasNullKeys_就已经够了.
     if (isLeftNullAwareJoinWithFilter(joinNode_)) {
       // We need to check null key rows in build side in case of null-aware anti
       // or left semi project join with filter set.
@@ -334,6 +338,11 @@ void HashBuild::addInput(RowVectorPtr input) {
     activeRows_.setAll();
   }
 
+  // 1) kRight/kFull/kRightSemiProject 这3种join类型, 总是需要返回所有build rows.
+  // 2) isLeftNullAwareJoin为true场景, 
+  //   a) filter不为null时, 则需要保留所有join key为null的build rows. 
+  //   b) filter为null时, 则只需要知道是否存在join key为null的build rows.
+  // 3) 其他情况下, 仅当nullAware_时, 统计joinHasNullKeys_
   if (!isRightJoin(joinType_) && !isFullJoin(joinType_) &&
       !isRightSemiProjectJoin(joinType_) &&
       !isLeftNullAwareJoinWithFilter(joinNode_)) {
@@ -361,6 +370,9 @@ void HashBuild::addInput(RowVectorPtr input) {
   }
 
   if (isAntiJoin(joinType_) && joinNode_->filter()) {
+    // TODO 在filter定义的情况下, 为啥仅仅对anti-join的场景才执行这里的操作, 其他场景
+    // 是不是也可以进行下面的优化操作? 不是, 比如join类型为kRight或者kFull等, 就需要保
+    // 留所有的build rows. 但对于join类型为kInner的时, 执行下面的优化也是安全的?
     if (filterPropagatesNulls_) {
       removeInputRowsForAntiJoinFilter();
     }
@@ -750,6 +762,8 @@ bool HashBuild::finishHashBuild() {
   CpuWallTiming timing;
   {
     CpuWallTimer cpuWallTimer{timing};
+    // 这里会对所有的tables进行总的rehash操作 (但其实之前所有的tables并没有真正创建过底层的
+    // hash table数据, 仅仅是将原始input存到了RowContainer中).
     table_->prepareJoinTable(
         std::move(otherTables),
         isInputFromSpill() ? spillConfig()->startPartitionBit

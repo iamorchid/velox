@@ -622,6 +622,7 @@ class SimpleFunctionMetadata : public ISimpleFunctionMetadata {
     builder.returnType(analysis.outputType);
     int32_t position = 0;
     for (const auto& arg : analysis.argsTypes) {
+      // 这里的ConstantChecker是类SimpleFunctionMetadata上的一个模版参数
       if (ConstantChecker::isConstant[position++]) {
         builder.constantArgumentType(arg);
       } else {
@@ -668,6 +669,7 @@ class UDFHolder {
   using Metadata =
       core::SimpleFunctionMetadata<Fun, TReturn, ConstantChecker, TArgs...>;
 
+  // 这里的模版参数Exec, 通常对应UdfTypeResolver.h中定义的VectorExec
   template <typename T>
   using exec_resolver = typename Exec::template resolver<T>;
 

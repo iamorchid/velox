@@ -1409,6 +1409,7 @@ TEST_F(VectorTest, copyFromUnknown) {
   });
 }
 
+// 理解wrapInConstant相关的测试
 TEST_F(VectorTest, wrapInConstant) {
   // wrap flat vector
   const vector_size_t size = 1'000;

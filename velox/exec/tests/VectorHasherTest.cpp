@@ -131,6 +131,7 @@ class VectorHasherTest : public testing::Test, public VectorTestBase {
       ok = hasher->computeValueIds(allRows, result);
       ASSERT_FALSE(ok);
 
+      // enableValueRange不调用的话, 这几个值不会变化
       hasher->cardinality(0, asRange, asDistinct);
       ASSERT_GT(asRange, 18);
       ASSERT_GT(asDistinct, 18);
@@ -201,6 +202,7 @@ TEST_F(VectorHasherTest, flat) {
     }
   }
 
+  // 参考precompute注释说明
   // Test precompute methods for single null value.
   hasher->precompute(*vector);
   hasher->hashPrecomputed(allRows_, false, hashes);
@@ -367,6 +369,7 @@ TEST_F(VectorHasherTest, dictionary) {
   }
 }
 
+// [star][test] VectorHasherTest.stringIds
 // Tests how strings are mapped to uint64_t (if they fit) and to
 // consecutive ids of distinct values for the general case.
 TEST_F(VectorHasherTest, stringIds) {
@@ -396,7 +399,12 @@ TEST_F(VectorHasherTest, stringIds) {
   // values have an integer range mapping.  We run these elements
   // through the hasher.
   hasher->decode(*vector, rows);
+
+  // 在调用enableValueIds或者enableValueRange之前, VectorHasher的rangeSize_
+  // 和isRange_字段不会设置. computeValueIds这里只会value分析, 即统计关联vector
+  // 的range (min/max) 以及distinct值.
   EXPECT_FALSE(hasher->computeValueIds(rows, hashes));
+
   uint64_t asRange;
   uint64_t asDistincts;
   // Get the range of ids as min-max range and as count of distincts.
@@ -408,6 +416,7 @@ TEST_F(VectorHasherTest, stringIds) {
   EXPECT_EQ(asDistincts, 16);
   hasher->enableValueIds(1, 10);
   hasher->decode(*vector, rows);
+  // 这里是基于distinct值的数量来生成valueIds
   EXPECT_TRUE(hasher->computeValueIds(rows, hashes));
   // The 8 first have sequential ids.
   for (auto i = 0; i < 8; ++i) {
@@ -415,8 +424,21 @@ TEST_F(VectorHasherTest, stringIds) {
   }
   hasher->enableValueRange(1, 200);
   hasher->decode(*vector, rows);
+  // 这里是基于min/max值的来生成valueIds
   EXPECT_TRUE(hasher->computeValueIds(rows, hashes));
   for (auto i = 0; i < 8; ++i) {
+    // 
+    // 下面的校验值和逻辑本事完全不相关, 根据stringAsNumber的计算方式可以知道,
+    // StringView(zeros, 0)的numer为0, 而StringView(digits, 7)的number
+    // 则为87315741093802288, 上面执行enableValueRange(1, 200)后, below 
+    // 和above实际上填充: (87315741093802288 - 0) * (200 / 100.0), 即使
+    // 用的reserve值为: 174631482187604576. 因此, 前8个值在开启range的情况
+    // 下, 使用的hash值分别为:
+    //  0                 + 174631482187604576 + 1
+    // (0 + 1 << (1 * 8)) + 174631482187604576 + 1
+    // ...
+    // (0 + 1 << (7 * 8)) + 174631482187604576 + 1
+    //
     // Since the range is padded with 100 values above and below, all
     // the values should be >= 101 (0 stands for null).
     EXPECT_GE(hashes[i], 101);
@@ -475,6 +497,8 @@ TEST_F(VectorHasherTest, stringDistinctOverflow) {
   SelectivityVector rows(numRows, true);
   raw_vector<uint64_t> hashes{numRows};
   for (auto i = 0; i < 7; ++i) {
+    // string有kMaxDistinctStringsBytes限制, 超过这个限制
+    // 会执行VectorHasher::setDistinctOverflow().
     if (i < 5) {
       ASSERT_TRUE(hasher->mayUseValueIds());
       ASSERT_EQ(i * numRows, hasher->numUniqueValues());
@@ -534,7 +558,7 @@ TEST_F(VectorHasherTest, integerIds) {
 
   hasher = exec::VectorHasher::create(BIGINT(), 1);
   hasher->enableValueIds(1, VectorHasher::kNoLimit);
-  // We add values that are over 100K distinct and withmax - min > int64_t max.
+  // We add values that are over 100K distinct and with max - min > int64_t max.
   hasher->decode(*vector, rows);
   EXPECT_TRUE(hasher->computeValueIds(rows, hashes));
   // null is still 0.

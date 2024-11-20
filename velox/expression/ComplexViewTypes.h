@@ -557,7 +557,9 @@ auto materializeElement(const T& element) {
 template <bool returnsOptionalValues, typename V>
 class ArrayView {
  public:
+  // 这个reader对应的是ArrayVector的base vector (即elements_)
   using reader_t = VectorReader<V>;
+
   using element_t = typename std::conditional<
       returnsOptionalValues,
       typename reader_t::exec_in_t,

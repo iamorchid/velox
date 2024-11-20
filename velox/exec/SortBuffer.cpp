@@ -20,6 +20,8 @@
 
 namespace facebook::velox::exec {
 
+// 对于OrderBy算子而言, 它的output对应的RowType和input是一样的, 即Orderby
+// 算子不会改变数据的schema (RowType中的column的顺序也不会修改).
 SortBuffer::SortBuffer(
     const RowTypePtr& input,
     const std::vector<column_index_t>& sortColumnIndices,
@@ -44,39 +46,39 @@ SortBuffer::SortBuffer(
 
   std::vector<TypePtr> sortedColumnTypes;
   std::vector<TypePtr> nonSortedColumnTypes;
-  std::vector<std::string> sortedSpillColumnNames;
-  std::vector<TypePtr> sortedSpillColumnTypes;
+  std::vector<std::string> spillColumnNames;
+  std::vector<TypePtr> spillColumnTypes;
   sortedColumnTypes.reserve(sortColumnIndices.size());
   nonSortedColumnTypes.reserve(input->size() - sortColumnIndices.size());
-  sortedSpillColumnNames.reserve(input->size());
-  sortedSpillColumnTypes.reserve(input->size());
+  spillColumnNames.reserve(input->size());
+  spillColumnTypes.reserve(input->size());
   std::unordered_set<column_index_t> sortedChannelSet;
   // Sorted key columns.
   for (column_index_t i = 0; i < sortColumnIndices.size(); ++i) {
-    columnMap_.emplace_back(IdentityProjection(i, sortColumnIndices.at(i)));
-    sortedColumnTypes.emplace_back(input_->childAt(sortColumnIndices.at(i)));
-    sortedSpillColumnTypes.emplace_back(
-        input_->childAt(sortColumnIndices.at(i)));
-    sortedSpillColumnNames.emplace_back(input->nameOf(sortColumnIndices.at(i)));
-    sortedChannelSet.emplace(sortColumnIndices.at(i));
+    const auto inputIndex = sortColumnIndices.at(i);
+    columnMap_.emplace_back(IdentityProjection(i, inputIndex));
+    sortedColumnTypes.emplace_back(input_->childAt(inputIndex));
+    spillColumnTypes.emplace_back(input_->childAt(inputIndex));
+    spillColumnNames.emplace_back(input->nameOf(inputIndex));
+    sortedChannelSet.emplace(inputIndex);
   }
+
   // Non-sorted key columns.
-  for (column_index_t i = 0, nonSortedIndex = sortCompareFlags_.size();
-       i < input_->size();
-       ++i) {
+  column_index_t nonSortedIndex = sortCompareFlags_.size();
+  for (column_index_t i = 0; i < input_->size(); ++i) {
     if (sortedChannelSet.count(i) != 0) {
       continue;
     }
     columnMap_.emplace_back(nonSortedIndex++, i);
     nonSortedColumnTypes.emplace_back(input_->childAt(i));
-    sortedSpillColumnTypes.emplace_back(input_->childAt(i));
-    sortedSpillColumnNames.emplace_back(input->nameOf(i));
+    spillColumnTypes.emplace_back(input_->childAt(i));
+    spillColumnNames.emplace_back(input->nameOf(i));
   }
 
   data_ = std::make_unique<RowContainer>(
       sortedColumnTypes, nonSortedColumnTypes, pool_);
   spillerStoreType_ =
-      ROW(std::move(sortedSpillColumnNames), std::move(sortedSpillColumnTypes));
+      ROW(std::move(spillColumnNames), std::move(spillColumnTypes));
 }
 
 SortBuffer::~SortBuffer() {
@@ -189,6 +191,17 @@ void SortBuffer::spill() {
   }
   updateEstimatedOutputRowSize();
 
+  //
+  // sortedRows_不为空时, 则一定执行到了noMoreInput且之前没有发生过spill (即所有的数
+  // 据都定义在内存中, sortedRows_用于内存中的数据排序), 此时对应的一定是output阶段. 
+  // 也就是说, 之前addInput没有发生spill, 但是在排序时发生了spill.
+  //
+  // sortedRows_为空时, 执行到这里只可能对应input阶段而不可能对应output. 假设对应到
+  // output阶段, sortedRows_为空意味着addInput阶段发生过spill (否则noMoreInput中
+  // 必然会初始化sortedRows_), 则意味着noMoreInput将会执行spill操作, 进而执行
+  // spillInput(它会执行data_->clear()). 那么, 在output阶段时, spill()的执行在上
+  // 面的if语句中就提前返回了, 不可能执行到这里。
+  //
   if (sortedRows_.empty()) {
     spillInput();
   } else {
@@ -282,6 +295,8 @@ void SortBuffer::ensureOutputFits(vector_size_t batchSize) {
       estimatedOutputRowSize_.value() * batchSize * 1.2;
   {
     memory::ReclaimableSectionGuard guard(nonReclaimableSection_);
+    // 这里是先将需要的memory pool的reservationBytes_准备好 (可能会执行growCapacity), 
+    // 否则, 一点点去增加内存空间, 可能执行一部分操作后才发现超过了内存限制 (导致做了无用功).
     if (pool_->maybeReserve(outputBufferSizeToReserve)) {
       return;
     }
@@ -359,6 +374,8 @@ void SortBuffer::spillOutput() {
     // Already spilled.
     return;
   }
+
+  // numOutputRows_是之前getOutput已经返回过的行数
   if (numOutputRows_ == sortedRows_.size()) {
     // All the output has been produced.
     return;
@@ -422,6 +439,8 @@ void SortBuffer::getOutputWithSpill() {
   int32_t outputRow = 0;
   int32_t outputSize = 0;
   bool isEndOfBatch = false;
+  // getOutput时, 会先执行prepareOutput(batchSize)准备好output_. 同时, 在spill存在
+  // 的情况下, 也会执行prepareOutputWithSpill()来准备好spillMerger_.
   while (outputRow + outputSize < output_->size()) {
     SpillMergeStream* stream = spillMerger_->next();
     VELOX_CHECK_NOT_NULL(stream);

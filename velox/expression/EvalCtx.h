@@ -365,8 +365,7 @@ class EvalCtx {
   }
 
   /// Make sure the error vector is addressable up to index `size`-1. Initialize
-  /// all
-  /// new elements to null.
+  /// all new elements to null.
   void ensureErrorsVectorSize(vector_size_t size) {
     ensureErrorsVectorSize(errors_, size);
   }
@@ -454,6 +453,14 @@ class EvalCtx {
     return result && !isFinalSelection() && *finalSelection() != rows;
   }
 
+  // 
+  // [star][expr] moveOrCopyResult
+  // 这里的逻辑结合switch的场景会比较好理解些（参考SwitchExpr::evalSpecialForm）。
+  // 这里的localResult和rows，对应某一个分支的结果及其过滤条件，而result则是之前已有
+  // 分支的计算结果。很显然，对于switch场景，result中已有的结果需要保留。
+  // 另外，对于switch场景，isFinalSelection()为false（当前rows仅仅针对某一分支匹配
+  // 的行），finalSelection()此时表示的则是整个switch表达式要处理的行。
+  //
   // Copy "rows" of localResult into results if "result" is partially populated
   // and must be preserved. Copy localResult pointer into result otherwise.
   void moveOrCopyResult(
@@ -467,7 +474,12 @@ class EvalCtx {
     }
 #endif
     if (resultShouldBePreserved(result, rows)) {
+      // 当需要对result进行复制（它不被唯一引用）和扩容时，BaseVector::ensureWritable
+      // 不会复制rows中true对应的行，因为这些行会被overriden。
       BaseVector::ensureWritable(rows, result->type(), result->pool(), result);
+
+      // 这里仅仅从localResult中复制rows指定的行到result，即允许保留result中
+      // 其他行已有的结果。
       result->copy(localResult.get(), rows, nullptr);
     } else {
       result = localResult;
@@ -661,6 +673,8 @@ class LocalSingleRow {
   std::unique_ptr<SelectivityVector> vector_;
 };
 
+// 这个类本质上就是SelectivityVector的封装，内部包含了从ExecCtx的pool中分配
+// SelectivityVector，以及析构时将分配的SelectivityVector放回pool中。
 class LocalSelectivityVector {
  public:
   // Grab an instance of a SelectivityVector from the pool and resize it to
@@ -693,6 +707,7 @@ class LocalSelectivityVector {
   // the specified value.
   LocalSelectivityVector(EvalCtx& context, const SelectivityVector& value)
       : context_(*context.execCtx()), vector_(context_.getSelectivityVector()) {
+    // 这里会调用SelectivityVector的默认复制构造函数
     *vector_ = value;
   }
 

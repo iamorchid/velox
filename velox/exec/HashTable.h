@@ -81,10 +81,13 @@ struct HashLookup {
   /// Input to groupProbe and joinProbe APIs.
 
   /// Set of row numbers of row to probe.
+  // rows中包含的是需要处理的行号(即row number)
+  // {5, 10, 50, 60, 70, 100}, 大小为6
   raw_vector<vector_size_t> rows;
 
   /// Hashes or value IDs for rows in 'rows'. Not aligned with 'rows'. Index is
   /// the row number.
+  // {..., 5, ..., 10, ..., 50, ..., 60, ..., 70, ..., 100}, 大小为100
   raw_vector<uint64_t> hashes;
 
   /// Results of groupProbe and joinProbe APIs.
@@ -93,10 +96,12 @@ struct HashLookup {
   /// For groupProbe, a pointer to an existing or new row with matching grouping
   /// keys. For joinProbe, a pointer to the first row with matching keys or null
   /// if no match.
+  // {..., 5, ..., 10, ..., 50, ..., 60, ..., 70, ..., 100}, 大小为100
   raw_vector<char*> hits;
 
   /// For groupProbe, row numbers for which a new entry was inserted (didn't
   /// exist before the groupProbe). Empty for joinProbe.
+  // {5, 60, 100}, size大小为3
   std::vector<vector_size_t> newGroups;
 
   /// If using valueIds, list of concatenated valueIds. 1:1 with 'hashes'.
@@ -134,6 +139,10 @@ class BaseHashTable {
   static constexpr uint64_t kArrayHashMaxSize = 2L << 20;
 
   /// Specifies the hash mode of a table.
+  // a) 采用kHash模式时, group keys和hash是多对一的关系
+  // b) 采用kArray模式时, group keys和array index一一对应
+  // c) 采用kNormalizedKey模式时, group keys和hash一一对应. 
+  //    hash通过每个key的range组合得到, 值范围比较大, 不适合作为array的index.
   enum class HashMode { kHash, kArray, kNormalizedKey };
 
   static constexpr int8_t kNoSpillInputStartPartitionBit = -1;
@@ -489,17 +498,19 @@ class HashTable : public BaseHashTable {
 
   ~HashTable() override = default;
 
+  // HashTable<false>::createForAggregation(...)
   static std::unique_ptr<HashTable> createForAggregation(
       std::vector<std::unique_ptr<VectorHasher>>&& hashers,
       const std::vector<Accumulator>& accumulators,
       memory::MemoryPool* pool) {
+    // 下面的HashTable为何不需要提供模版参数??
     return std::make_unique<HashTable>(
         std::move(hashers),
         accumulators,
         std::vector<TypePtr>{},
-        false, // allowDuplicates
+        false, // allowDuplicates (hash join build允许多条记录具有相同的keys, 需要将它们串起来)
         false, // isJoinBuild
-        false, // hasProbedFlag
+        false, // hasProbedFlag (right join 或者 full join时用到)
         0, // minTableSizeForParallelJoinBuild
         pool);
   }
@@ -717,6 +728,7 @@ class HashTable : public BaseHashTable {
       reinterpret_cast<uint8_t*>(&tags_)[slotIndex] = tag;
     }
 
+    // 对应64位体系架构的机器, 指针地址真正有效bits只会用到48个
     void setPointer(int32_t slotIndex, void* pointer) {
       auto* const slot =
           reinterpret_cast<uintptr_t*>(&pointers_[slotIndex * kPointerSize]);

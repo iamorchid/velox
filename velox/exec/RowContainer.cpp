@@ -145,6 +145,13 @@ RowContainer::RowContainer(
       stringAllocator_(std::make_unique<HashStringAllocator>(pool)),
       accumulators_(accumulators),
       rows_(pool) {
+  //
+  // RowContainer中, 每一行的布局:
+  //                rowPtr                                        rowSizeOffset_  nextOffset_
+  //                  ||                                               ||            ||
+  //                  \/                                               \/            \/
+  // [normalizedKey], keys, flag bits, accumulators, dependent fields, [varRowSize], [nextRowPtr]
+  //
   // Compute the layout of the payload row.  The row has keys, null flags,
   // accumulators, dependent fields. All fields are fixed width. If variable
   // width data is referenced, this is done with StringView(for VARCHAR) and
@@ -177,8 +184,8 @@ RowContainer::RowContainer(
   int32_t nullOffset = 0;
   bool isVariableWidth = false;
   for (auto& type : keyTypes_) {
-    typeKinds_.push_back(type->kind());
     types_.push_back(type);
+    typeKinds_.push_back(type->kind());
     offsets_.push_back(offset);
     offset += typeKindSize(type->kind());
     nullOffsets_.push_back(nullOffset);
@@ -190,7 +197,7 @@ RowContainer::RowContainer(
   // Make offset at least sizeof pointer so that there is space for a
   // free list next pointer below the bit at 'freeFlagOffset_'.
   offset = std::max<int32_t>(offset, sizeof(void*));
-  const int32_t firstAggregateOffset = offset;
+  const int32_t flagBitsOffset = offset;
   if (!accumulators.empty()) {
     // This moves nullOffset to the start of the next byte.
     // This is to guarantee the null and initialized bits for an aggregate
@@ -198,12 +205,13 @@ RowContainer::RowContainer(
     nullOffset = (nullOffset + 7) & -8;
   }
   for (const auto& accumulator : accumulators) {
-    // Initialized bit.  Set when the accumulator is initialized.
+    // Initialized bit. Set when the accumulator is initialized.
     nullOffsets_.push_back(nullOffset);
     ++nullOffset;
     // Null bit.
     nullOffsets_.push_back(nullOffset);
     ++nullOffset;
+    
     isVariableWidth |= !accumulator.isFixedSize();
     usesExternalMemory_ |= accumulator.usesExternalMemory();
     alignment_ = combineAlignments(accumulator.alignment(), alignment_);
@@ -215,20 +223,23 @@ RowContainer::RowContainer(
     ++nullOffset;
     isVariableWidth |= !type->isFixedWidth();
   }
+
   if (hasProbedFlag) {
     nullOffsets_.push_back(nullOffset);
-    probedFlagOffset_ = nullOffset + firstAggregateOffset * 8;
+    probedFlagOffset_ = nullOffset + flagBitsOffset * 8;
     ++nullOffset;
   }
+
   // Free flag.
   nullOffsets_.push_back(nullOffset);
-  freeFlagOffset_ = nullOffset + firstAggregateOffset * 8;
+  freeFlagOffset_ = nullOffset + flagBitsOffset * 8;
   ++nullOffset;
+
   // Add 1 to the last null offset to get the number of bits.
   flagBytes_ = bits::nbytes(nullOffsets_.back() + 1);
   // Fixup 'nullOffsets_' to be the bit number from the start of the row.
   for (int32_t i = 0; i < nullOffsets_.size(); ++i) {
-    nullOffsets_[i] += firstAggregateOffset * 8;
+    nullOffsets_[i] += flagBitsOffset * 8;
   }
   offset += flagBytes_;
   for (const auto& accumulator : accumulators) {
@@ -302,9 +313,13 @@ char* RowContainer::newRow() {
       ++numRowsWithNormalizedKey_;
     }
   }
+  // 由eraseRows知道, free列表中的rows已经执行过相关的内存释放了
   return initializeRow(row, false /* reuse */);
 }
 
+/// 这里的reuse很难理解, 底层的memory在task结束后会全部自动释放, 如果reuse为false, 
+/// 则意味着当前row占用的memory不急着释放 (即不会被后续的内存申请复用). 如果reuse为
+/// true, 则意味着希望释放占用的内存, 以便后续其他rows申请内存时可以复用.
 char* RowContainer::initializeRow(char* row, bool reuse) {
   if (reuse) {
     auto rows = folly::Range<char**>(&row, 1);
@@ -312,8 +327,8 @@ char* RowContainer::initializeRow(char* row, bool reuse) {
     freeAggregates(rows);
     VELOX_CHECK_EQ(nextOffset_, 0);
   } else if (rowSizeOffset_ != 0) {
-    // zero out string views so that clear() will not hit uninited data. The
-    // fastest way is to set the whole row to 0.
+    // zero out string views so that clear() will not hit uninited data. 
+    // The fastest way is to set the whole row to 0.
     ::memset(row, 0, fixedRowSize_);
   }
   if (!nullOffsets_.empty()) {
@@ -322,6 +337,7 @@ char* RowContainer::initializeRow(char* row, bool reuse) {
         initialNulls_.data(),
         initialNulls_.size());
   }
+  // row为可变长度时, 会定义rowSizeOffset_
   if (rowSizeOffset_) {
     variableRowSize(row) = 0;
   }

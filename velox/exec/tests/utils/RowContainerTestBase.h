@@ -65,6 +65,8 @@ class RowContainerTestBase : public testing::Test,
       const TypePtr& rowType,
       const size_t size,
       std::function<void(RowVectorPtr)> customizeData) {
+    // isNullAt 没有提供时, 会基于伪随机数来决定哪些行为null, 参见
+    // BatchMaker.cpp中createScalar的实现.
     auto batch = std::static_pointer_cast<RowVector>(
         velox::test::BatchMaker::createBatch(rowType, size, *pool_));
     if (customizeData) {
@@ -79,13 +81,13 @@ class RowContainerTestBase : public testing::Test,
       bool isJoinBuild = true) {
     auto container = std::make_unique<RowContainer>(
         keyTypes,
-        !isJoinBuild,
+        !isJoinBuild /* nullableKeys */,
         std::vector<Accumulator>{},
         dependentTypes,
         isJoinBuild,
         isJoinBuild,
-        true,
-        true,
+        true /* hasProbedFlag */,
+        true /* hasNormalizedKeys */,
         pool_.get());
     VELOX_CHECK(container->testingMutable());
     return container;

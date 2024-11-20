@@ -1045,8 +1045,12 @@ TEST_F(RowContainerTest, storeExtractArrayOfVarchar) {
   roundTrip(input);
 }
 
+// [star][test] TEST_F(RowContainerTest, types)
 TEST_F(RowContainerTest, types) {
   constexpr int32_t kNumRows = 100;
+
+  // 这里生成的RowVector, 对于每个child column, 会随机地为rows设置null, 
+  // 见BatchMaker.cpp中createScalar的实现.
   auto batch = makeDataset(
       ROW(
           {{"bool_val", BOOLEAN()},
@@ -1128,7 +1132,11 @@ TEST_F(RowContainerTest, types) {
   SelectivityVector allRows(kNumRows);
   for (auto column = 0; column < batch->childrenSize(); ++column) {
     if (column < keys.size()) {
+      // 这个不影响下面的EXPECT_EQ测试, 主要是为了将key相关的column vector的rows
+      // 全部设置为非null. 创建RowContainer时, nullableKeys采用的为false.
       makeNonNull(batch, column);
+
+      // makeRowContainer时, nullableKeys参数会设置为false
       EXPECT_EQ(data->columnAt(column).nullMask(), 0);
     } else {
       EXPECT_NE(data->columnAt(column).nullMask(), 0);
@@ -1145,15 +1153,16 @@ TEST_F(RowContainerTest, types) {
   for (auto column = 0; column < batch->childrenSize(); ++column) {
     testExtractColumn(*data, rows, column, batch->childAt(column));
 
+    auto source = batch->childAt(column);
+    auto columnType = batch->type()->asRow().childAt(column);
+    VectorHasher hasher(columnType, column);
+    hasher.decode(*source, allRows);
+    raw_vector<uint64_t> hashes(kNumRows);
+    hasher.hash(allRows, false, hashes);
+
     auto extracted = copy->childAt(column);
     extracted->resize(kNumRows);
     data->extractColumn(rows.data(), rows.size(), column, extracted);
-    raw_vector<uint64_t> hashes(kNumRows);
-    auto source = batch->childAt(column);
-    auto columnType = batch->type()->as<TypeKind::ROW>().childAt(column);
-    VectorHasher hasher(columnType, column);
-    hasher.decode(*source, allRows);
-    hasher.hash(allRows, false, hashes);
     DecodedVector decoded(*extracted, allRows);
     std::vector<uint64_t> rowHashes(kNumRows);
     data->hash(
@@ -1169,6 +1178,7 @@ TEST_F(RowContainerTest, types) {
     column_index_t dependantColumn =
         column < keys.size() ? column + keys.size() : column - keys.size();
     for (auto i = 0; i < kNumRows; ++i) {
+      // TODO column为0时, 这个不成立吗?
       if (column) {
         EXPECT_EQ(hashes[i], rowHashes[i]);
       }

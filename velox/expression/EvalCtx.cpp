@@ -279,6 +279,9 @@ void EvalCtx::moveAppendErrors(EvalErrorsPtr& other) {
 
 const VectorPtr& EvalCtx::getField(int32_t index) const {
   const VectorPtr* field;
+  // 对于所有的input fields而言, Expr::peelEncodings保证要么全部被peel, 
+  // 要么一个也不peel, 因为它们的peeling操作, 使用的是相同的rows映射 (这就
+  // 要求多个input的dict wrapping是一样的, 这个感觉非常难满足).
   if (!peeledFields_.empty()) {
     field = &peeledFields_[index];
   } else {
@@ -296,6 +299,9 @@ VectorPtr EvalCtx::ensureFieldLoaded(
     const SelectivityVector& rows) {
   auto field = getField(index);
   if (isLazyNotLoaded(*field)) {
+    // [question] 
+    // isFinalSelection_为false时, 为何要用finalSelection_? 这里根据方法名称
+    // 来看, 看起来是需要对整个field进行load.
     const auto& rowsToLoad = isFinalSelection_ ? rows : *finalSelection_;
 
     LocalDecodedVector holder(*this);
@@ -352,15 +358,21 @@ void resizePrimitiveTypeVectors(
   VELOX_DCHECK(
       vector->type()->isPrimitiveType(), "Only used for primitive types.");
   auto currentSize = vector->size();
+
+  // 通过BaseVector::ensureWritable可以知道，需要对vector进行复制时，
+  // 会保留extraRows中false对应的行（即extraRows中true对应的行，认为
+  // 会被overriden，无需进行复制）。
   LocalSelectivityVector extraRows(context, targetSize);
   extraRows->setValidRange(0, currentSize, false);
   extraRows->setValidRange(currentSize, targetSize, true);
   extraRows->updateBounds();
+
   BaseVector::ensureWritable(
       *extraRows, vector->type(), context.pool(), vector);
 }
 
 // static
+// 参考BaseVector.cpp中有关BaseVector::addNulls说明。
 void EvalCtx::addNulls(
     const SelectivityVector& rows,
     const uint64_t* rawNulls,
@@ -392,8 +404,10 @@ void EvalCtx::addNulls(
   if (result.use_count() != 1 || !result->isNullsWritable()) {
     if (result->type()->isPrimitiveType()) {
       if (currentSize < targetSize) {
+        // 对result vector进行扩容且复制已有的rows（可能创建新的vector）
         resizePrimitiveTypeVectors(result, targetSize, context);
       } else {
+        // 对result vector进行全量复制（可能创建新的vector）
         BaseVector::ensureWritable(
             SelectivityVector::empty(), type, context.pool(), result);
       }
@@ -430,6 +444,8 @@ ScopedFinalSelectionSetter::ScopedFinalSelectionSetter(
     : evalCtx_(evalCtx),
       oldFinalSelection_(*evalCtx.mutableFinalSelection()),
       oldIsFinalSelection_(*evalCtx.mutableIsFinalSelection()) {
+  // evalCtx.isFinalSelection()为true时, 说明当前执行环境没有发生在IF/ELSE
+  // 的分支之下, 此时evalctx.evalCtx.finalSelection_还没有初始化.
   if ((evalCtx.isFinalSelection() && checkCondition) || override) {
     *evalCtx.mutableFinalSelection() = finalSelection;
     *evalCtx.mutableIsFinalSelection() = false;

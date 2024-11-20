@@ -143,6 +143,14 @@ struct has_method {
   static constexpr bool value = type::value;
 };
 
+// 
+// C++14允许使用尾置返回类型（trailing return type）来指示返回类型，这在复杂的
+// 情况下特别有用，例如当函数的返回类型取决于条件表达式或其他复杂逻辑时。
+// template <typename T1, typename T2>
+// auto add(T1 a, T2 b) -> decltype(a + b) {
+//     return a + b;
+// }
+//
 // Declares a method resolver to be used with has_method.
 #define DECLARE_METHOD_RESOLVER(Name, MethodName)              \
   struct Name {                                                \

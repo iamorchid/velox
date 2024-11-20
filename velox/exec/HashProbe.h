@@ -107,8 +107,8 @@ class HashProbe : public Operator {
   }
 
  private:
-  // Indicates if the join type includes misses from the left side in the
-  // output.
+  // Indicates if the join type includes misses (namely includes proble rows that are
+  // not matched with any build row) from the left side in the output.
   static bool joinIncludesMissesFromLeft(core::JoinType joinType) {
     return isLeftJoin(joinType) || isFullJoin(joinType) ||
         isAntiJoin(joinType) || isLeftSemiProjectJoin(joinType);

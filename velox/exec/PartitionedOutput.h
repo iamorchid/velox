@@ -54,10 +54,10 @@ class Destination {
     }
   }
 
-  /// Serializes row from 'output' till either 'maxBytes' have been serialized
-  /// or
+  /// Serializes row from 'output' till either 'maxPageSize' have been 
+  /// serialized or all rows have been serialized.
   BlockingReason advance(
-      uint64_t maxBytes,
+      uint64_t maxPageSize,
       const std::vector<vector_size_t>& sizes,
       const RowVectorPtr& output,
       const row::CompactRow* outputCompactRow,
@@ -181,6 +181,9 @@ class PartitionedOutput : public Operator {
     return BlockingReason::kNotBlocked;
   }
 
+  // 没有更多input, 且所有destination的数据都flush到OutputBufferManager
+  // 后(下有tasks可能并没消费完buffer中的数据), 就可以返回true, 此时对应的
+  // driver也正常可以退出了.
   bool isFinished() override;
 
   void close() override;

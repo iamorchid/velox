@@ -1273,6 +1273,7 @@ struct ConstantArgumentFunction {
   }
 };
 
+// [star][test] TEST_F(SimpleFunctionTest, constantArgument)
 TEST_F(SimpleFunctionTest, constantArgument) {
   registerFunction<
       ConstantArgumentFunction,

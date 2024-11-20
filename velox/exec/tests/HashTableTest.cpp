@@ -264,6 +264,7 @@ class HashTableTest : public testing::TestWithParam<bool>,
       auto key = input.childAt(hashers[i]->channel());
       hashers[i]->decode(*key, rows);
       if (mode != BaseHashTable::HashMode::kHash) {
+        // hasher收集对应channel的value相关的统计信息
         if (!hashers[i]->computeValueIds(rows, lookup.hashes)) {
           rehash = true;
         }
@@ -695,6 +696,7 @@ TEST_P(HashTableTest, clearAfterInsert) {
   }
 }
 
+// [star][HashTable] TEST_P(HashTableTest, bestWithReserveOverflow)
 // Test a specific code path in HashTable::decodeHashMode where
 // rangesWithReserve overflows, distinctsWithReserve fits and bestWithReserve =
 // rangesWithReserve.
@@ -717,7 +719,11 @@ TEST_P(HashTableTest, bestWithReserveOverflow) {
   //  405,000,000,000,000,000.
   // Also, make sure bestWithReserve == rangesWithReserve and therefore
   // overflows as well.
-  //  Range is considered 'best' if range < 20 * ndv.
+  //  Range is considered 'best' if range <= 20 * ndv.
+  //
+  // 下面的注释说的是, 这里的测试需要覆盖VectorHasher的multiplier设置逻辑, 如果所有
+  // key的VectorHasher没有设置multiplier(即采用默认的1), 最后计算出来的value IDs
+  // 将由最后一个VectorHasher决定.
   //
   // Finally, make sure last key has some duplicate values. The original bug
   // this test is reproducing was when HashTable failed to set multiplier for
@@ -732,6 +738,7 @@ TEST_P(HashTableTest, bestWithReserveOverflow) {
           20'000, [](auto row) { return 3 + (row / 2) * 10; }),
   });
 
+  // BaseVector::size(): 数据的行数
   lookup->reset(data->size());
   insertGroups(*data, *lookup, *table);
 
@@ -748,6 +755,7 @@ TEST_P(HashTableTest, bestWithReserveOverflow) {
   SelectivityVector rows(data->size());
   raw_vector<uint64_t> valueIds(data->size());
 
+  // 这里计算得到的valueIds, 是所有hasher计算结果mix出来的
   for (int32_t i = 0; i < numKeys; ++i) {
     bool ok = table->hashers()[i]->computeValueIds(rows, valueIds);
     ASSERT_TRUE(ok);
