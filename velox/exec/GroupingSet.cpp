@@ -169,7 +169,9 @@ bool equalKeys(
 }
 } // namespace
 
+// [star][agg] GroupingSet::addInput
 void GroupingSet::addInput(const RowVectorPtr& input, bool mayPushdown) {
+  // isGlobal_为true, 说明grouping keys为空
   if (isGlobal_) {
     addGlobalAggregationInput(input, mayPushdown);
     return;
@@ -256,6 +258,10 @@ void GroupingSet::addInputForActiveRows(
   }
 
   table_->groupProbe(*lookup_, BaseHashTable::kNoSpillInputStartPartitionBit);
+
+  // 下面的SQL, 在生成plan时, 为会agg的filter自动转成bool类型的project字段,
+  // 下面getSelectivityVector(i)会基于masks_选择对应agg需要的rows.
+  // select coordinator, sum(latency) filter (where latency < 1000) from log group by coordinator
   masks_.addInput(input, activeRows_);
 
   auto* groups = lookup_->hits.data();
@@ -266,6 +272,7 @@ void GroupingSet::addInputForActiveRows(
       continue;
     }
 
+    // 当agg定义filter后, 不同的agg操作的rows不一样
     const auto& rows = getSelectivityVector(i);
 
     if (aggregates_[i].distinct) {
@@ -289,7 +296,9 @@ void GroupingSet::addInputForActiveRows(
       continue;
     }
 
+    // 为当前agg函数准备好输入(放到tempVectors_中)
     populateTempVectors(i, input);
+
     // TODO(spershin): We disable the pushdown at the moment if selectivity
     // vector has changed after groups generation, we might want to revisit
     // this.
@@ -371,6 +380,7 @@ std::vector<Accumulator> GroupingSet::accumulators(bool excludeToIntermediate) {
   return accumulators;
 }
 
+// [star][agg] GroupingSet::createHashTable
 void GroupingSet::createHashTable() {
   if (ignoreNullKeys_) {
     table_ = HashTable<true>::createForAggregation(
@@ -708,7 +718,7 @@ void GroupingSet::populateTempVectors(
     int32_t aggregateIndex,
     const RowVectorPtr& input) {
   const auto& channels = aggregates_[aggregateIndex].inputs;
-  const auto& constants = aggregates_[aggregateIndex].constantInputs;
+  const auto& constants = aggregates_[aggregateIndex].constantInputs; // VectorPtr
   tempVectors_.resize(channels.size());
   for (auto i = 0; i < channels.size(); ++i) {
     if (channels[i] == kConstantChannel) {

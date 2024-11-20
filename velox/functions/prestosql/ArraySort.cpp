@@ -201,6 +201,7 @@ void applyScalarType(
   rows.applyToSelected(processRow);
 }
 
+// [star][func] ArraySortFunction
 // See documentation at https://prestodb.io/docs/current/functions/array.html
 template <TypeKind Kind>
 class ArraySortFunction : public exec::VectorFunction {
@@ -288,7 +289,7 @@ class ArraySortFunction : public exec::VectorFunction {
     return std::make_shared<ArrayVector>(
         context.pool(),
         inputArray->type(),
-        inputArray->nulls(),
+        inputArray->nulls(), /* 这里的nulls和rows不匹配? */
         rows.end(),
         inputArray->offsets(),
         inputArray->sizes(),

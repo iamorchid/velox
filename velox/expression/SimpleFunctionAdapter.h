@@ -77,6 +77,8 @@ class SimpleFunctionAdapter : public VectorFunction {
       typename std::tuple_element<POSITION, typename FUNC::arg_types>::type;
   using result_vector_t =
       typename TypeToFlatVector<typename FUNC::return_type>::type;
+
+  // 这里的FUNC其实对应的是core::UDFHolder<...>
   std::unique_ptr<FUNC> fn_;
 
   // Whether the return type for this UDF allows for fast path iteration.
@@ -225,6 +227,15 @@ class SimpleFunctionAdapter : public VectorFunction {
     if constexpr (POSITION == FUNC::num_args) {
       return (*fn_).initialize(inputTypes, config, values...);
     } else {
+      // 注意, 这里没有对variadic arg进行特殊处理, 因为当前initialize不支持
+      // 这种情况（如果通过提供了initialize和variadic参数, 编译时会报错). 可
+      // 以参见SimpleFunctionMetadata.h中的相关逻辑.
+      // 
+      // // Initialize could be supported with variadicArgs
+      // static_assert(
+      //     !(udf_has_initialize && Metadata::isVariadic()),
+      //     "Initialize is not supported for UDFs with VariadicArgs.");
+
       if (packed.at(POSITION) != nullptr) {
         SelectivityVector rows(1);
         DecodedVector decodedVector(*packed.at(POSITION), rows);
@@ -242,6 +253,8 @@ class SimpleFunctionAdapter : public VectorFunction {
   }
 
  public:
+  // [question] SimpleFunctionAdapter的constantInputs怎么传入的?
+  // 参见compileRewrittenExpression
   SimpleFunctionAdapter(
       const std::vector<TypePtr>& inputTypes,
       const core::QueryConfig& config,
@@ -283,6 +296,8 @@ class SimpleFunctionAdapter : public VectorFunction {
         SimpleTypeTrait<arg_at<POSITION>>::typeKind ==
             return_type_traits::typeKind &&
         !providesCustomComparison<arg_at<POSITION>>::value) {
+      // 这里感觉可以直接使用这种更简单的形式
+      // using type = SimpleTypeTrait<arg_at<POSITION>>::NativeType;
       using type =
           typename VectorExec::template resolver<arg_at<POSITION>>::in_type;
       if (args[POSITION]->isFlatEncoding() && args[POSITION].use_count() == 1 &&
@@ -441,6 +456,8 @@ class SimpleFunctionAdapter : public VectorFunction {
       return false;
     }
 
+    // 仅当callNullFree定义的情况下, 会满足这里的if条件. 对于complex类型, 即使本身
+    // 不为null, 但如果包含null, callNullFree也会跳过而直接返回null.
     if (FUNC::is_default_contains_nulls_behavior) {
       // If the function has is_default_contains_nulls_behavior it returns
       // null if data contain null even if the return type of callNullFree is
@@ -533,6 +550,10 @@ class SimpleFunctionAdapter : public VectorFunction {
       iterate(applyContext, readers..., variadicReader);
     } else {
       // Use ConstantFlatVectorReader as optimization when applicable.
+      // [question]
+      // 下面的优化为何要求所有primitive args都满足flat/constant? 如果存在一
+      // 个primitive arg不是flag/constant, 其他primitive args就不能使用这
+      // 个优化?
       if constexpr (
           allPrimitiveArgsFlatConstant &&
           isArgFlatConstantFastPathEligible<POSITION>) {
@@ -548,6 +569,9 @@ class SimpleFunctionAdapter : public VectorFunction {
         unpack<POSITION + 1, allPrimitiveArgsFlatConstant>(
             applyContext, decodedArgs, rawArgs, readers..., reader);
       } else {
+        // [star][func] function args unpack
+        // 如果参数类型为complext type, 比如const arg_type<Array<int64_t>>&,
+        // 将会走到这里的unpack逻辑.
         decodedArgs[POSITION] = LocalDecodedVector(
             applyContext.context, *rawArgs[POSITION], *applyContext.rows);
 
@@ -572,6 +596,11 @@ class SimpleFunctionAdapter : public VectorFunction {
           ...);
     }
 
+    //
+    // is_default_contains_nulls_behavior定义如下:
+    // static constexpr bool is_default_contains_nulls_behavior =
+    //     !udf_has_call && !udf_has_callNullable;
+    //
     // If is_default_contains_nulls_behavior we return null if the inputs
     // contain any nulls.
     // If !is_default_contains_nulls_behavior we don't invoke callNullFree
@@ -580,6 +609,11 @@ class SimpleFunctionAdapter : public VectorFunction {
     bool callNullFree = FUNC::is_default_contains_nulls_behavior ||
         (FUNC::udf_has_callNullFree && !applyContext.mayHaveNullsRecursive);
 
+    // is_default_null_behavior定义如下:
+    // // Default null behavior means assuming null output if any of the inputs is
+    // // null, without calling the function implementation.
+    // static constexpr bool is_default_null_behavior = !udf_has_callNullable;
+
     // Compute allNotNull.
     bool allNotNull;
     if constexpr (FUNC::is_default_null_behavior) {
@@ -587,6 +621,13 @@ class SimpleFunctionAdapter : public VectorFunction {
     } else {
       allNotNull = (!readers.mayHaveNulls() && ...);
     }
+
+    // [star][func] doApplyNotNull和doApply说明
+    // doApplyNotNull并不一定就调用用户实现的call函数, 而doApply也不一定调用用户
+    // 实现的callNullable函数. core::UDFHolder的call和callNullable函数会进行
+    // 一层处理, 比如, SimpleFunctionAdapter执行doApply时, 会调用UDFHolder的
+    // callNullable函数, 但如果用户没有实现callNullable时, 则会在args都不为null
+    // 时调用用户的call函数.
 
     // Iterate the rows.
     if constexpr (fastPathIteration) {
@@ -883,7 +924,10 @@ class SimpleFunctionAdapter : public VectorFunction {
       bool& notNull,
       R0& currentReader,
       const TStuff&... extra) const {
+    // 对于complext type, currentReader[idx]对应的是view,
+    // 参考VectorReader<Array<V>>
     decltype(currentReader[idx]) v0 = currentReader[idx];
+    // 当POSITION + 1为FUNC::num_args时, 将会调用下面的doApplyNotNull
     return doApplyNotNull<POSITION + 1>(idx, target, notNull, extra..., v0);
   }
 

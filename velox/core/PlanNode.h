@@ -1480,66 +1480,53 @@ enum class JoinType {
   // all combinations. In addition, return all rows from the left that have no
   // match on the right with right-side columns filled with nulls.
   kLeft = 1,
-  // Opposite of kLeft. For each row on the right, find all matching rows on
-  // the
+  // Opposite of kLeft. For each row on the right, find all matching rows on the
   // left and return all combinations. In addition, return all rows from the
   // right that have no match on the left with left-side columns filled with
   // nulls.
   kRight = 2,
-  // A "union" of kLeft and kRight. For each row on the left, find all
-  // matching
-  // rows on the right and return all combinations. In addition, return all
-  // rows
-  // from the left that have no
-  // match on the right with right-side columns filled with nulls. Also,
-  // return
-  // all rows from the
-  // right that have no match on the left with left-side columns filled with
-  // nulls.
+  // A "union" of kLeft and kRight. For each row on the left, find all matching
+  // rows on the right and return all combinations. In addition, return all rows
+  // from the left that have no match on the right with right-side columns
+  // filled with nulls. Also, return all rows from the right that have no match
+  // on the left with left-side columns filled with nulls.
   kFull = 3,
-  // Return a subset of rows from the left side which have a match on the
-  // right
+  // Return a subset of rows from the left side which have a match on the right
   // side. For this join type, cardinality of the output is less than or equal
   // to the cardinality of the left side.
   kLeftSemiFilter = 4,
   // Return each row from the left side with a boolean flag indicating whether
-  // there exists a match on the right side. For this join type, cardinality
-  // of
+  // there exists a match on the right side. For this join type, cardinality of
   // the output equals the cardinality of the left side.
   //
   // The handling of the rows with nulls in the join key depends on the
   // 'nullAware' boolean specified separately.
   //
-  // Null-aware join follows IN semantic. Regular join follows EXISTS
-  // semantic.
+  // Null-aware join follows IN semantic. Regular join follows EXISTS semantic.
   kLeftSemiProject = 5,
   // Opposite of kLeftSemiFilter. Return a subset of rows from the right side
   // which have a match on the left side. For this join type, cardinality of
-  // the
-  // output is less than or equal to the cardinality of the right side.
+  // the output is less than or equal to the cardinality of the right side.
   kRightSemiFilter = 6,
   // Opposite of kLeftSemiProject. Return each row from the right side with a
-  // boolean flag indicating whether there exists a match on the left side.
-  // For
+  // boolean flag indicating whether there exists a match on the left side. For
   // this join type, cardinality of the output equals the cardinality of the
   // right side.
   //
   // The handling of the rows with nulls in the join key depends on the
   // 'nullAware' boolean specified separately.
   //
-  // Null-aware join follows IN semantic. Regular join follows EXISTS
-  // semantic.
+  // Null-aware join follows IN semantic. Regular join follows EXISTS semantic.
   kRightSemiProject = 7,
   // Return each row from the left side which has no match on the right side.
   // The handling of the rows with nulls in the join key depends on the
   // 'nullAware' boolean specified separately.
   //
   // Null-aware join follows NOT IN semantic:
-  // (1) return empty result if the right side contains a record with a null
-  // in
+  // (1) return empty result if the right side contains a record with a null in
   // the join key;
-  // (2) return left-side row with null in the join key only when
-  // the right side is empty.
+  // (2) return left-side row with null in the join key only when the right side
+  // is empty.
   //
   // Regular anti join follows NOT EXISTS semantic:
   // (1) ignore right-side rows with nulls in the join keys;
