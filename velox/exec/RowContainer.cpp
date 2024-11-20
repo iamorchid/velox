@@ -147,6 +147,13 @@ RowContainer::RowContainer(
       stringAllocator_(std::make_unique<HashStringAllocator>(pool)),
       accumulators_(accumulators),
       rows_(pool) {
+  //
+  // RowContainer中, 每一行的布局:
+  //                rowPtr
+  //                  ||
+  //                  \/
+  // [normalizedKey], keys, flag bits, accumulators, dependent fields, [varRowSize], [nextOffset]
+  //
   // Compute the layout of the payload row.  The row has keys, null flags,
   // accumulators, dependent fields. All fields are fixed width. If variable
   // width data is referenced, this is done with StringView(for VARCHAR) and
@@ -324,6 +331,7 @@ char* RowContainer::initializeRow(char* row, bool reuse) {
         initialNulls_.data(),
         initialNulls_.size());
   }
+  // row为可变长度时, 会定义rowSizeOffset_
   if (rowSizeOffset_) {
     variableRowSize(row) = 0;
   }

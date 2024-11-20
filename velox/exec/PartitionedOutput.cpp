@@ -216,6 +216,7 @@ PartitionedOutput::PartitionedOutput(
 void PartitionedOutput::initializeInput(RowVectorPtr input) {
   input_ = std::move(input);
   if (outputType_->size() == 0) {
+    // count(*)操作, 即只统计行数
     output_ = std::make_shared<RowVector>(
         input_->pool(),
         outputType_,
@@ -303,6 +304,8 @@ void PartitionedOutput::estimateRowSizes() {
   }
 }
 
+// Driver在执行完addInput后, 会执行getOutput, 因此不会出现getOutput
+// 没有执行而连续掉用addInput两次的情况.
 void PartitionedOutput::addInput(RowVectorPtr input) {
   initializeInput(std::move(input));
   initializeDestinations();
@@ -405,8 +408,15 @@ RowVectorPtr PartitionedOutput::getOutput() {
 
   bool workLeft;
   do {
+    // destination的addRow或addRows操作, 用于记录原始input中的具体那些行会写到
+    // 对应的destination, 而advance操作则是具体数据的收集过程。
+    // 
+    // 数据会先通过current_->append收集(此时对下游task是不可见的), 当收集到一定量
+    // 后, 会将数据写到OutputBufferManager(此时下游task可以读取到).
+    // 
     workLeft = false;
     for (auto& destination : destinations_) {
+      // 如果destination处理完了addRow操作的所有行, 则会被置为true
       bool atEnd = false;
       blockingReason_ = destination->advance(
           maxPageSize,
@@ -420,6 +430,11 @@ RowVectorPtr PartitionedOutput::getOutput() {
           &future_,
           scratch_);
       if (blockingReason_ != BlockingReason::kNotBlocked) {
+        // TODO
+        // 这里的逻辑感觉可以优化下, 后续的destination还是可以继续进行advanced. 否则, 
+        // 后续dedestination中的数据会得不到及时的消费. 即下面的条件不容易满足:
+        // destination->serializedBytes() < kMinDestinationSize
+        //
         blockedDestination = destination.get();
         workLeft = false;
         // We stop on first blocked. Adding data to unflushed targets

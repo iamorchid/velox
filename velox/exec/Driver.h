@@ -82,8 +82,8 @@ struct DriverStats {
 /// On thread - 'thread' is set to the thread that is running the Driver. Next
 /// states are blocked, terminated, suspended, enqueued.
 ///
-///  Blocked - The Driver is not on thread and is waiting for an external event.
-///  Next states are terminated, enqueued.
+/// Blocked - The Driver is not on thread and is waiting for an external event.
+/// Next states are terminated, enqueued.
 ///
 /// Suspended - The Driver is on thread, 'thread' and 'isSuspended' are set. The
 /// thread does not manipulate the Driver's state and is suspended as in waiting
@@ -91,10 +91,10 @@ struct DriverStats {
 /// we keep the stack so that when the wait is over the control stack is not
 /// lost. Next states are on thread or terminated.
 ///
-///  Terminated - 'isTerminated' is set. The Driver cannot run after this and
+/// Terminated - 'isTerminated' is set. The Driver cannot run after this and
 /// the state is final.
 ///
-/// CancelPool  allows terminating or pausing a set of Drivers. The Task API
+/// CancelPool allows terminating or pausing a set of Drivers. The Task API
 /// allows starting or resuming Drivers. When terminate is requested the request
 /// is successful when all Drivers are off thread, blocked or suspended. When
 /// pause is requested, we have success when all Drivers are either enqueued,

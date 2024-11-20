@@ -75,7 +75,7 @@ void BaseVector::ensureNullsCapacity(
   const auto fill = setNotNull ? bits::kNotNull : bits::kNull;
   // Ensure the size of nulls_ is always at least as large as length_.
   const auto size = std::max<vector_size_t>(minimumSize, length_);
-  if (nulls_ && !nulls_->isView() && nulls_->unique()) {
+  if (nulls_ && nulls_->isMutable()) {
     if (nulls_->capacity() < bits::nbytes(size)) {
       AlignedBuffer::reallocate<bool>(&nulls_, size, fill);
     }
@@ -84,6 +84,8 @@ void BaseVector::ensureNullsCapacity(
     // the underlying buffer.
     // TODO: move this inside reallocate.
     rawNulls_ = nulls_->as<uint64_t>();
+    // [question] 
+    // setNotNull为false，不需要初始化[length_, size_)之间的值？
     if (setNotNull && length_ < size) {
       bits::fillBits(
           const_cast<uint64_t*>(rawNulls_), length_, size, bits::kNotNull);
@@ -91,6 +93,8 @@ void BaseVector::ensureNullsCapacity(
   } else {
     auto newNulls = AlignedBuffer::allocate<bool>(size, pool_, fill);
     if (nulls_) {
+      // [question]
+      // 这里不用考虑length_没有按照8 bit对齐的特殊情况？
       ::memcpy(
           newNulls->asMutable<char>(),
           nulls_->as<char>(),
@@ -215,6 +219,8 @@ static VectorPtr addConstant(
 
   if (vector->isNullAt(index)) {
     if constexpr (std::is_same_v<T, ComplexType>) {
+    // [question]
+    // 对于complext类型，为啥null的情况下也要准备valueVector_?
       auto singleNull = BaseVector::create(vector->type(), 1, pool);
       singleNull->setNull(0, true);
       return std::make_shared<ConstantVector<T>>(
@@ -229,6 +235,8 @@ static VectorPtr addConstant(
     if (vector->isConstantEncoding()) {
       auto constVector = vector->as<ConstantVector<T>>();
       if constexpr (!std::is_same_v<T, ComplexType>) {
+        // 对于非ComplexType, ConstantVector中使用的valueVector_一般会设置为null，除非
+        // valueVector_满足isLazyNotLoaded，见ConstantVector.h中的setInternalState。
         if (!vector->valueVector()) {
           T value = constVector->valueAt(0);
           return std::make_shared<ConstantVector<T>>(
@@ -247,6 +255,9 @@ static VectorPtr addConstant(
     }
   }
 
+  // copy base有个好处，如果ConstantVector需要引用base(比如对于ComplextType),
+  // 则允许调用方后面释放参数中的vector(它可能包含更多元素，新的base只包含一个元素), 
+  // 从而节省内存。
   if (copyBase) {
     VectorPtr copy = BaseVector::create(vector->type(), 1, pool);
     copy->copy(vector.get(), 0, index, 1);
@@ -296,13 +307,15 @@ static VectorPtr createEmpty(
     // Make sure to initialize StringView values so they can be safely accessed.
     values = AlignedBuffer::allocate<T>(size, pool, T());
   } else {
+    // 对于其他TypeKind为primitive的类型, 这里分配的内存是随机值, 
+    // 需要上层调用方进行显式设置
     values = AlignedBuffer::allocate<T>(size, pool);
   }
 
   return std::make_shared<FlatVector<T>>(
       pool,
       type,
-      BufferPtr(nullptr),
+      BufferPtr(nullptr) /* no nulls */,
       size,
       std::move(values),
       std::vector<BufferPtr>());
@@ -396,6 +409,10 @@ void BaseVector::copyNulls(
   });
 }
 
+//
+// Sets null when 'bits' has null value for a row in 'rows'
+// rows用于选择需要操作的行，bits中bit为0对应的行，表示为null；反之，表示不为null。
+//
 void BaseVector::addNulls(const uint64_t* bits, const SelectivityVector& rows) {
   if (bits == nullptr || !rows.hasSelections()) {
     return;
@@ -403,6 +420,8 @@ void BaseVector::addNulls(const uint64_t* bits, const SelectivityVector& rows) {
   VELOX_CHECK(isNullsWritable());
   VELOX_CHECK_GE(length_, rows.end());
   ensureNulls();
+  // Null flags are bit-packed into an array of 64-bit unsigned integers. 
+  // Zero indicates a null value. One indicates a non-null value. 
   auto target = nulls_->asMutable<uint64_t>();
   const uint64_t* selected = rows.asRange().bits();
   // A 0 in bits with a 1 in rows makes a 0 in nulls.
@@ -413,6 +432,9 @@ void BaseVector::addNulls(const uint64_t* bits, const SelectivityVector& rows) {
         target[idx] &= ~mask | (bits[idx] | ~selected[idx]);
       },
       [target, bits, selected](int32_t idx) {
+        // 这里的操作思路是:
+        // 1) 对于不在rows中选择的行 (即selected对应的bit为0), null保持不变
+        // 2) 而在rows中选择的行, null情况由bits来决定
         target[idx] &= bits[idx] | ~selected[idx];
       });
 }
@@ -585,6 +607,8 @@ std::string BaseVector::toString(
 
 void BaseVector::ensureWritable(const SelectivityVector& rows) {
   auto newSize = std::max<vector_size_t>(rows.end(), length_);
+
+  // 对于BufferPtr来说, mutable需要满足: !isView() && unique()
   if (nulls_ && !nulls_->isMutable()) {
     BufferPtr newNulls = AlignedBuffer::allocate<bool>(newSize, pool_);
     auto rawNewNulls = newNulls->asMutable<uint64_t>();
@@ -594,10 +618,19 @@ void BaseVector::ensureWritable(const SelectivityVector& rows) {
     rawNulls_ = nulls_->as<uint64_t>();
   }
 
+  // 扩容时，默认新增的行会采用not null，这样做是有意义的，因为BaseVector::addNulls
+  // 是基于AND操作判断后续操作是不是需要将具体行置为null。
+  // [star][vector] BaseVector::resize
+  // resize是一个virtual方法, BaseVector只会处理null bits相关的resize, 而data相关
+  // 的resize则由子类实现，可以参考FlatVector-inl.h中resize.
   this->resize(newSize);
   this->resetDataDependentFlags(&rows);
 }
 
+// [star][vector] BaseVector::ensureWritable
+// 参考EvalCtx.h文件中的moveOrCopyResult函数。
+// Makes 'result' writable for 'rows'. 
+// static
 void BaseVector::ensureWritable(
     const SelectivityVector& rows,
     const TypePtr& type,
@@ -605,6 +638,9 @@ void BaseVector::ensureWritable(
     VectorPtr& result,
     VectorPool* vectorPool) {
   if (!result) {
+    // 注意, 这里创建的VectorPtr使用的nulls为nullptr, 即意味着所有行
+    // 都不为null (nulls和rows并不一致). 这样操作并不会有问题, 具体原
+    // 因参见IsNull.cpp中的说明.
     if (vectorPool) {
       result = vectorPool->get(type, rows.end());
     } else {
@@ -612,6 +648,7 @@ void BaseVector::ensureWritable(
     }
     return;
   }
+
   const auto& resultType = result->type();
   bool isUnknownType = resultType->containsUnknown();
   if (result->encoding() == VectorEncoding::Simple::LAZY) {
@@ -632,18 +669,20 @@ void BaseVector::ensureWritable(
     }
   }
 
-  // The copy-on-write size is the max of the writable row set and the
-  // vector.
+  // The copy-on-write size is the max of the writable row set and the vector.
   auto targetSize = std::max<vector_size_t>(rows.end(), result->size());
+  TypePtr targetType = isUnknownType ? type : resultType;
 
   VectorPtr copy;
   if (vectorPool) {
-    copy = vectorPool->get(isUnknownType ? type : resultType, targetSize);
+    copy = vectorPool->get(targetType, targetSize);
   } else {
-    copy =
-        BaseVector::create(isUnknownType ? type : resultType, targetSize, pool);
+    copy = BaseVector::create(targetType, targetSize, pool);
   }
   SelectivityVector copyRows(result->size());
+  // 1）参考EvalCtx.cpp中的resizePrimitiveTypeVectors如何设置rows
+  // 2）参考Expr.cpp中moveOrCopyResult相关说明，对于rows指定的行，调用方
+  //    会进行显示覆盖，因此不用对这些行进行复制
   copyRows.deselect(rows);
   if (copyRows.hasSelections()) {
     copy->copy(result.get(), copyRows, nullptr);

@@ -223,6 +223,8 @@ bool VectorHasher::makeValueIdsFlatNoNulls(
     const SelectivityVector& rows,
     uint64_t* result) {
   const auto* values = decoded_.data<T>();
+  // 对于StringView而言, tryMapToRange总是false. 但valueId函数中,
+  // StringView的实现模版支持isRange_为true是, 返回valueId.
   if (isRange_ && tryMapToRange(values, rows, result)) {
     return true;
   }
@@ -249,6 +251,7 @@ bool VectorHasher::makeValueIdsFlatWithNulls(
   return success;
 }
 
+// [star][HashTable] VectorHasher::makeValueIdsDecoded
 template <typename T, bool mayHaveNulls>
 bool VectorHasher::makeValueIdsDecoded(
     const SelectivityVector& rows,
@@ -820,6 +823,7 @@ uint64_t VectorHasher::enableValueRange(
     int32_t reservePct) {
   multiplier_ = multiplier;
   VELOX_CHECK_LE(0, reservePct);
+  // range必须先统计好(StringView的情况下, range不能overflow)
   VELOX_CHECK(hasRange_);
   extendRange(type_->kind(), reservePct, min_, max_);
   isRange_ = true;

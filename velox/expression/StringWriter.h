@@ -26,6 +26,7 @@ namespace facebook::velox::exec {
 template <bool reuseInput = false>
 class StringWriter;
 
+// [star] StringWriter
 template <>
 class StringWriter<false /*reuseInput*/> : public UDFOutputString {
  public:
@@ -54,6 +55,9 @@ class StringWriter<false /*reuseInput*/> : public UDFOutputString {
     auto newStartAddress =
         newDataBuffer->asMutable<char>() + newDataBuffer->size();
 
+    // 这里将之前已有的数据复制到buffer中, 需要说明的是, 对buffer size的更新在finalize()
+    // 执行时才进行. 因此, 即是后续进行append操作时, 当前buffer的capacity不足而切换新的
+    // buffer时, 之前写入到老buffer的数据并不可见.
     if (size() != 0) {
       std::memcpy(newStartAddress, data(), size());
     }

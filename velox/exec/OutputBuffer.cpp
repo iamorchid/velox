@@ -147,6 +147,9 @@ DestinationBuffer::Data DestinationBuffer::getData(
 
   std::vector<std::unique_ptr<folly::IOBuf>> data;
   uint64_t resultBytes = 0;
+  // seq以page为单位, i表示当前内存中有多少个page已经被确认接受了. 但是在调用
+  // getData之前, 通常会先执行DestinationBuffer::getData, 因此这里的i通常
+  // 为0.
   auto i = sequence - sequence_;
   if (maxBytes > 0) {
     for (; i < data_.size(); ++i) {
@@ -178,6 +181,8 @@ DestinationBuffer::Data DestinationBuffer::getData(
   if (!atEnd && arbitraryBuffer) {
     arbitraryBuffer->getAvailablePageSizes(remainingBytes);
   }
+  // 这里data.empty()不需要考虑, remainingBytes.empty() && atEnd 满足的情况下, 
+  // 已经决定后续getData不会返回更多结果了, 可以告诉client已经达到end了。
   if (data.empty() && remainingBytes.empty() && atEnd) {
     data.push_back(nullptr);
   }

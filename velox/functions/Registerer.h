@@ -55,6 +55,7 @@ bool registerFunction(
   return exec::registerSimpleFunction<holderClass>(aliases, {}, overwrite);
 }
 
+// [star][func] registerFunction
 // New registration function; mostly a copy from the function above, but taking
 // the inner "udf" struct directly, instead of the wrapper. We can keep both for
 // a while to maintain backwards compatibility, but the idea is to remove the
