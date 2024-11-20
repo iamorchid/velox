@@ -90,6 +90,8 @@ struct ValueSet<ComplexType> {
 /// which will be present in the output, and wrapped into a DictionaryVector.
 /// Next the `lengths` and `offsets` vectors that control where output arrays
 /// start and end are wrapped into the output ArrayVector.template <typename T>
+///
+/// [star][func] ArrayDistinctFunction
 template <typename T, bool useCustomComparison = false>
 class ArrayDistinctFunction : public exec::VectorFunction {
  public:
@@ -105,6 +107,10 @@ class ArrayDistinctFunction : public exec::VectorFunction {
 
     // Input can be constant or flat.
     if (arg->isConstantEncoding()) {
+      // select array_distinct(ARRAY[1, 3, 10, 3, 20]) from log
+      // 对于complex类型的ConstantVector, 其模版类型(即编译类型)统一采用ComplexType, 
+      // 而数据本身的类型（动态类型）则有type_来指示.参考velox/parse/Expressions.cpp
+      // 中函数Expressions::inferTypes对ConstantExpr的处理.
       auto* constantArray = arg->as<ConstantVector<ComplexType>>();
       const auto& flatArray = constantArray->valueVector();
       const auto flatIndex = constantArray->index();
@@ -157,6 +163,9 @@ class ArrayDistinctFunction : public exec::VectorFunction {
     // Process the rows: store unique values in the hash table.
     ValueSetT uniqueSet;
 
+    // [question] ArrayDistinctFunction
+    // 这里不需要考虑row为null的情况？exec::VectorFunction的isDefaultNullBehavior()
+    // 默认为true, 在执行apply的时候, rows会仅仅包含非null的行.
     rows.applyToSelected([&](vector_size_t row) {
       auto size = arrayVector->sizeAt(row);
       auto offset = arrayVector->offsetAt(row);
@@ -165,6 +174,7 @@ class ArrayDistinctFunction : public exec::VectorFunction {
       bool hasNulls = false;
       for (vector_size_t i = offset; i < offset + size; ++i) {
         if (elements->isNullAt(i)) {
+          // 对于null的情况, 我们只需要保留其中一个null即可
           if (!hasNulls) {
             hasNulls = true;
             rawNewIndices[indicesCursor++] = i;

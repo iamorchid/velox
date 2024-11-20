@@ -1,0 +1,87 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36" version="24.9.3">
+  <diagram name="第 1 页" id="f1aQ9Yh1nEY1558Oe-eO">
+    <mxGraphModel dx="1290" dy="699" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-2" value="VectorSerde" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="240" y="190" width="160" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-4" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;strokeColor=inherit;" parent="Tt1erRjtMUPQppJXAZ_j-2" vertex="1">
+          <mxGeometry y="26" width="160" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-5" value="+ createIterativeSerializer&lt;div&gt;+&amp;nbsp;createBatchSerializer&lt;/div&gt;&lt;div&gt;+&amp;nbsp;deserialize&lt;/div&gt;" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;whiteSpace=wrap;html=1;" parent="Tt1erRjtMUPQppJXAZ_j-2" vertex="1">
+          <mxGeometry y="34" width="160" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-6" value="PrestoVectorSerde" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="240" y="370" width="160" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-7" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;strokeColor=inherit;" parent="Tt1erRjtMUPQppJXAZ_j-6" vertex="1">
+          <mxGeometry y="26" width="160" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-9" value="Extends" style="endArrow=block;endSize=16;endFill=0;html=1;rounded=0;entryX=0.506;entryY=0.982;entryDx=0;entryDy=0;entryPerimeter=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;" parent="1" source="Tt1erRjtMUPQppJXAZ_j-6" target="Tt1erRjtMUPQppJXAZ_j-5" edge="1">
+          <mxGeometry width="160" relative="1" as="geometry">
+            <mxPoint x="330" y="360" as="sourcePoint" />
+            <mxPoint x="490" y="360" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-10" value="VectorStreamGroup" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="520" y="190" width="330" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-11" value="+ serializer_: std::unique_ptr&amp;lt;IterativeVectorSerializer&amp;gt;&lt;div&gt;+&amp;nbsp;serde_:&amp;nbsp;VectorSerde*&lt;/div&gt;" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;whiteSpace=wrap;html=1;" parent="Tt1erRjtMUPQppJXAZ_j-10" vertex="1">
+          <mxGeometry y="26" width="330" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-12" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;strokeColor=inherit;" parent="Tt1erRjtMUPQppJXAZ_j-10" vertex="1">
+          <mxGeometry y="70" width="330" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-13" value="+&amp;nbsp;createStreamTree(...) {&amp;nbsp;&lt;div&gt;&amp;nbsp;&amp;nbsp;serializer_ = serde_-&amp;gt;createIterativeSerializer(...);&lt;br&gt;&lt;div&gt;}&amp;nbsp;&lt;div&gt;+ append(const RowVectorPtr&amp;amp;): void&lt;div&gt;+ flush(OutputStream*): void&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;whiteSpace=wrap;html=1;" parent="Tt1erRjtMUPQppJXAZ_j-10" vertex="1">
+          <mxGeometry y="78" width="330" height="92" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-14" value="IterativeVectorSerializer" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="220" y="520" width="230" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-16" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;strokeColor=inherit;" parent="Tt1erRjtMUPQppJXAZ_j-14" vertex="1">
+          <mxGeometry y="26" width="230" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-17" value="+ append(const RowVectorPtr&amp;amp;): void&lt;div&gt;+ flush(OutputStream *): void&lt;/div&gt;&lt;div&gt;+ clear(): void&lt;/div&gt;" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;whiteSpace=wrap;html=1;" parent="Tt1erRjtMUPQppJXAZ_j-14" vertex="1">
+          <mxGeometry y="34" width="230" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-18" value="BatchVectorSerializer" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="520" y="520" width="330" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-19" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;strokeColor=inherit;" parent="Tt1erRjtMUPQppJXAZ_j-18" vertex="1">
+          <mxGeometry y="26" width="330" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="Tt1erRjtMUPQppJXAZ_j-20" value="+ serialize(const RowVectorPtr&amp;amp;, OutputStream *): void" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;whiteSpace=wrap;html=1;" parent="Tt1erRjtMUPQppJXAZ_j-18" vertex="1">
+          <mxGeometry y="34" width="330" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="-ScI_tnQx1YU-dOOllGS-1" value="PrestoIterativeVectorSerializer" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="223" y="690" width="230" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="-ScI_tnQx1YU-dOOllGS-2" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;strokeColor=inherit;" vertex="1" parent="-ScI_tnQx1YU-dOOllGS-1">
+          <mxGeometry y="26" width="230" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="-ScI_tnQx1YU-dOOllGS-3" value="PrestoBatchVectorSerializer" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="564" y="690" width="230" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="-ScI_tnQx1YU-dOOllGS-4" value="" style="line;strokeWidth=1;fillColor=none;align=left;verticalAlign=middle;spacingTop=-1;spacingLeft=3;spacingRight=3;rotatable=0;labelPosition=right;points=[];portConstraint=eastwest;strokeColor=inherit;" vertex="1" parent="-ScI_tnQx1YU-dOOllGS-3">
+          <mxGeometry y="26" width="230" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="-ScI_tnQx1YU-dOOllGS-5" value="Extends" style="endArrow=block;endSize=16;endFill=0;html=1;rounded=0;entryX=0.513;entryY=1.054;entryDx=0;entryDy=0;entryPerimeter=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;" edge="1" parent="1" source="-ScI_tnQx1YU-dOOllGS-1" target="Tt1erRjtMUPQppJXAZ_j-17">
+          <mxGeometry x="0.0393" width="160" relative="1" as="geometry">
+            <mxPoint x="330" y="380" as="sourcePoint" />
+            <mxPoint x="331" y="289" as="targetPoint" />
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="-ScI_tnQx1YU-dOOllGS-6" value="Extends" style="endArrow=block;endSize=16;endFill=0;html=1;rounded=0;entryX=0.482;entryY=1.018;entryDx=0;entryDy=0;entryPerimeter=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;" edge="1" parent="1" source="-ScI_tnQx1YU-dOOllGS-3" target="Tt1erRjtMUPQppJXAZ_j-20">
+          <mxGeometry x="0.0393" width="160" relative="1" as="geometry">
+            <mxPoint x="348" y="700" as="sourcePoint" />
+            <mxPoint x="348" y="623" as="targetPoint" />
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
