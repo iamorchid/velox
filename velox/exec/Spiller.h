@@ -27,7 +27,8 @@ class SpillerTest;
 
 class SpillerBase {
  public:
-  using SpillRows = std::vector<char*, memory::StlAllocator<char*>>;
+ /// 由MemoryPool.h中StlAllocator定义可以知道, 可以将MemoryPool&隐士转为StlAllocator
+ using SpillRows = std::vector<char*, memory::StlAllocator<char*>>;
 
   virtual ~SpillerBase() = default;
 

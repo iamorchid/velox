@@ -848,6 +848,8 @@ class MemoryPoolImpl : public MemoryPool {
     if (neededSize <= 0) {
       return 0;
     }
+    // 这里会尝试reserve比请求大的空间大小(最小以MB为粒度), 即提前reverse
+    // 一定的余量, 避免后续频繁进行grow操作.
     return roundedDelta(reservationBytes_, neededSize);
   }
 

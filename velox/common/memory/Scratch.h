@@ -95,8 +95,8 @@ class Scratch {
   Item* items_{nullptr};
   int32_t fill_{0};
   int32_t capacity_{0};
-  // The total size held. If too large from outlier use cases, 'this' should be
-  // trimmed.
+  // The total size held. If too large from outlier use cases, 
+  // 'this' should be trimmed.
   int64_t retainedSize_{0};
 };
 
@@ -133,6 +133,8 @@ class ScratchPtr {
       ptr_ = inline_;
       return ptr_;
     }
+    // raw_vector在进行resize时, 也会预留足够的padded bytes, 
+    // 以保证simd操作的安全性.
     data_ = scratch_->get();
     data_.resize(size * sizeof(T));
     ptr_ = reinterpret_cast<T*>(data_.data());

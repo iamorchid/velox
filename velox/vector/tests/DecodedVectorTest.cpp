@@ -554,6 +554,7 @@ TEST_F(DecodedVectorTest, constantNull) {
   testConstantNull(ROW({INTEGER()}));
 }
 
+// [star][test] TEST_F(DecodedVectorTest, constantComplexType)
 TEST_F(DecodedVectorTest, constantComplexType) {
   auto arrayVector = makeArrayVector<int64_t>(
       10,

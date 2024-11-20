@@ -32,6 +32,11 @@ target_link_libraries(
   velox_memory
   velox_expression)
 
+add_executable(velox_example_expression_eval_ext ExpressionEvalExt.cpp)
+
+target_link_libraries(velox_example_expression_eval_ext velox_type velox_vector
+                      velox_caching velox_memory velox_expression)
+
 add_executable(velox_example_opaque_type OpaqueType.cpp)
 target_link_libraries(
   velox_example_opaque_type

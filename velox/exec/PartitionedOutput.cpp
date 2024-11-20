@@ -55,7 +55,7 @@ Destination::Destination(
 }
 
 BlockingReason Destination::advance(
-    uint64_t maxBytes,
+    uint64_t maxPageSize,
     const std::vector<vector_size_t>& sizes,
     const RowVectorPtr& output,
     const row::CompactRow* outputCompactRow,
@@ -72,7 +72,7 @@ BlockingReason Destination::advance(
   }
 
   const auto firstRow = rowIdx_;
-  const uint32_t adjustedMaxBytes = (maxBytes * targetSizePct_) / 100;
+  const uint32_t adjustedMaxBytes = (maxPageSize * targetSizePct_) / 100;
   if (bytesInCurrent_ >= adjustedMaxBytes) {
     return flush(bufferManager, bufferReleaseFn, future);
   }
@@ -90,6 +90,7 @@ BlockingReason Destination::advance(
   // Serialize
   if (current_ == nullptr) {
     current_ = std::make_unique<VectorStreamGroup>(pool_, serde_);
+    // Type.h: std::dynamic_pointer_cast<const RowType>(type)
     const auto rowType = asRowType(output->type());
     current_->createStreamTree(rowType, rowsInCurrent_, serdeOptions_);
   }
@@ -102,6 +103,8 @@ BlockingReason Destination::advance(
     VELOX_CHECK_NOT_NULL(outputUnsafeRow);
     current_->append(*outputUnsafeRow, rows, sizes);
   } else {
+    // presto serializer的数据格式:
+    // https://prestodb.io/docs/current/develop/serialized-page.html
     VELOX_CHECK_EQ(serde_->kind(), VectorSerde::Kind::kPresto);
     current_->append(output, rows, scratch);
   }
@@ -217,6 +220,7 @@ PartitionedOutput::PartitionedOutput(
 void PartitionedOutput::initializeInput(RowVectorPtr input) {
   input_ = std::move(input);
   if (outputType_->size() == 0) {
+    // count(*)操作, 即只统计行数
     output_ = std::make_shared<RowVector>(
         input_->pool(),
         outputType_,
@@ -286,8 +290,12 @@ void PartitionedOutput::initializeSizeBuffers() {
 void PartitionedOutput::estimateRowSizes() {
   const auto numInput = input_->size();
   std::fill(rowSize_.begin(), rowSize_.end(), 0);
+
+  // 参考RawVector.cpp中iota的实现
   raw_vector<vector_size_t> storage;
-  const auto numbers = iota(numInput, storage);
+  const auto numbers = iota(numInput, storage); // const int32_t*
+
+  // 下面的range对应的值为: 0, 1, 2, ..., numInput - 1
   const auto rows = folly::Range(numbers, numInput);
   if (serde_->kind() == VectorSerde::Kind::kCompactRow) {
     VELOX_CHECK_NOT_NULL(outputCompactRow_);
@@ -304,6 +312,8 @@ void PartitionedOutput::estimateRowSizes() {
   }
 }
 
+// Driver在执行完addInput后, 会执行getOutput, 因此不会出现getOutput
+// 没有执行而连续调用addInput两次的情况.
 void PartitionedOutput::addInput(RowVectorPtr input) {
   initializeInput(std::move(input));
   initializeDestinations();
@@ -406,8 +416,15 @@ RowVectorPtr PartitionedOutput::getOutput() {
 
   bool workLeft;
   do {
+    // destination的addRow或addRows操作, 用于记录原始input中的具体那些行会写到
+    // 对应的destination, 而advance操作则是具体数据的收集过程。
+    // 
+    // 数据会先通过current_->append收集(此时对下游task是不可见的), 当收集到一定量
+    // 后, 会将数据写到OutputBufferManager(此时下游task可以读取到).
+    // 
     workLeft = false;
     for (auto& destination : destinations_) {
+      // 如果destination处理完了addRow操作的所有行, 则会被置为true
       bool atEnd = false;
       blockingReason_ = destination->advance(
           maxPageSize,
@@ -421,6 +438,14 @@ RowVectorPtr PartitionedOutput::getOutput() {
           &future_,
           scratch_);
       if (blockingReason_ != BlockingReason::kNotBlocked) {
+        // TODO
+        // 这里的逻辑感觉可以优化下, 后续的destination还是可以继续进行advanced. 
+        // 否则, 后续dedestination中的数据会得不到及时的消费.
+        // 
+        // 看起来是没法优化了, 所有destination是共用OutputBuffer的bufferedBytes_
+        // 来作为限制的, 即后续destination进行flush时, 也会blocked. 
+        // 参见: OutputBuffer::enqueue
+        //
         blockedDestination = destination.get();
         workLeft = false;
         // We stop on first blocked. Adding data to unflushed targets
@@ -450,6 +475,7 @@ RowVectorPtr PartitionedOutput::getOutput() {
   // All of 'output_' is written into the destinations. We are finishing, hence
   // move all the destinations to the output queue. This will not grow memory
   // and hence does not need blocking.
+  // 执行Operator::noMoreInput()后, 会设置 noMoreInput_ 为true.
   if (noMoreInput_) {
     for (auto& destination : destinations_) {
       if (destination->isFinished()) {
@@ -460,6 +486,9 @@ RowVectorPtr PartitionedOutput::getOutput() {
       destination->updateStats(this);
     }
 
+    // 告诉OutputBufferManager, 当前task的一个output driver已经完成了输出.
+    // 当所有的output drivers都完成了输出后, output buffer就可以往queue中投
+    // 放结束标志了(下游tasks就知道没有更多数据需要读取了).
     bufferManager->noMoreData(operatorCtx_->task()->taskId());
     finished_ = true;
   }
