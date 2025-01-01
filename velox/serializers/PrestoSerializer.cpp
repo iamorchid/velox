@@ -2756,6 +2756,8 @@ void serializeFlatVector(
       appendStrings(nullptr, rows, rawValues, stream, scratch);
     } else {
       stream->appendNonNull(rows.size());
+      // stream->values()对应ByteOutputStream, 由多段不连续的ByteRange组成的.
+      // 这里通过AppendWindow封装下, 提供出空间连续的内存.
       AppendWindow<T> window(stream->values(), scratch);
       auto* output = window.get(rows.size());
       if (stream->isLongDecimal()) {
@@ -2770,6 +2772,7 @@ void serializeFlatVector(
     return;
   }
 
+  // 4表示在stack上预留4个uint64_t大小的空间.
   ScratchPtr<uint64_t, 4> nullsHolder(scratch);
   uint64_t* nulls = nullsHolder.get(bits::nwords(rows.size()));
   simd::gatherBits(vector->rawNulls(), rows, nulls);
@@ -3693,6 +3696,7 @@ int64_t flushUncompressed(
   // Write zero checksum.
   writeInt64(out, 0);
 
+  // 计算CRC时, 对计算的bytes有顺序要求: Columns, Codec, Rows, UncompressedSize
   // Number of columns and stream content. Unpause CRC.
   if (listener) {
     listener->resume();
@@ -4169,8 +4173,8 @@ class PrestoIterativeVectorSerializer : public IterativeVectorSerializer {
   }
 
   // The SerializedPage layout is:
-  // numRows(4) | codec(1) | uncompressedSize(4) | compressedSize(4) |
-  // checksum(8) | data
+  // numRows(4) | codec(1) | uncompressedSize(4) | compressedSize(4) | checksum(8) | data
+  // 参考: https://prestodb.io/docs/current/develop/serialized-page.html
   void flush(OutputStream* out) override {
     constexpr int32_t kMaxCompressionAttemptsToSkip = 30;
     if (!needCompression(*codec_)) {

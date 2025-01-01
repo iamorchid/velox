@@ -458,8 +458,7 @@ bool eagerFlush(const core::PlanNode& node) {
 
 std::shared_ptr<Driver> DriverFactory::createDriver(
     std::unique_ptr<DriverCtx> ctx,
-    std::shared_ptr<ExchangeClient> exchangeClient,
-    std::function<int(int pipelineId)> numDrivers) {
+    std::shared_ptr<ExchangeClient> exchangeClient) {
   auto driver = std::shared_ptr<Driver>(new Driver());
   ctx->driver = driver.get();
   std::vector<std::unique_ptr<Operator>> operators;

@@ -479,6 +479,8 @@ bool OutputBuffer::enqueue(
         VELOX_UNREACHABLE(PartitionedOutputNode::kindString(kind_));
     }
 
+    // 这里的bufferedBytes_是同一个task的所有destinations以及所有drivers共用的. 
+    // promises_采用vector, 主要是考虑到多driver并发往destinations写数据的情况.
     if (bufferedBytes_ >= maxSize_ && future) {
       promises_.emplace_back("OutputBuffer::enqueue");
       *future = promises_.back().getSemiFuture();
@@ -551,6 +553,8 @@ void OutputBuffer::enqueuePartitionedOutputLocked(
   VELOX_DCHECK(dataAvailableCbs.empty());
 
   VELOX_CHECK_LT(destination, buffers_.size());
+
+  // buffer为null时, 说明对应的下有task已经执行过OutputBuffer::deleteResults
   auto* buffer = buffers_[destination].get();
   if (buffer != nullptr) {
     buffer->enqueue(std::move(data));
@@ -722,6 +726,7 @@ void OutputBuffer::getData(
   {
     std::lock_guard<std::mutex> l(mutex_);
 
+    // 看起来非partitioned的情况下(比如broadcast), 可以动态加入destination
     if (!isPartitioned() && destination >= buffers_.size()) {
       addOutputBuffersLocked(destination + 1);
     }

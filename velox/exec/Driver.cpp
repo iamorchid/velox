@@ -241,6 +241,8 @@ void Driver::enqueue(std::shared_ptr<Driver> driver) {
   if (driver->closed_) {
     return;
   }
+  // 对于presto, 使用的是PrestoServer中初始化的driverExecutor_, 线程
+  // 数量参见PrestoServer::initializeThreadPools.
   driver->task()->queryCtx()->executor()->add(
       [driver]() { Driver::run(driver); });
 }
@@ -522,6 +524,8 @@ StopReason Driver::runInternal(
       ctx_->task->setError(
           makeException("Cancelled", __FILE__, __LINE__, __FUNCTION__));
     }
+
+    // 执行当前cb时, 还处于on-thread阶段
     close();
   });
 
@@ -890,8 +894,7 @@ void Driver::close() {
     return;
   }
 
-  // 目前看起来, 执行到这里时, isOnThread()一定为true, 同时也满足isTerminated().
-  // 因此, 下面的条件应该使用: if (!isOnThread() || !isTerminated())
+  // 目前看起来, 执行到这里时, isOnThread()一定为true
   if (!isOnThread() && !isTerminated()) {
     LOG(FATAL) << "Driver::close is only allowed from the Driver's thread";
   }
@@ -1135,6 +1138,7 @@ StopReason Driver::blockDriver(
     std::shared_ptr<BlockingState>& blockingState,
     CancelGuard& guard) {
   auto* op = operators_[blockedOperatorId].get();
+  // 这里确保future不是被std::move后, 继续使用的future
   VELOX_CHECK(
       future.valid(),
       "The operator {} is blocked but blocking future is not valid",

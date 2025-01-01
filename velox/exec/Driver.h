@@ -265,6 +265,7 @@ class BlockingState {
 /// Special group id to reflect the ungrouped execution.
 constexpr uint32_t kUngroupedGroupId{std::numeric_limits<uint32_t>::max()};
 
+/// 初始化时机参见: Task::createDriversLocked
 struct DriverCtx {
   const int driverId;
   const int pipelineId;
@@ -640,10 +641,10 @@ struct DriverFactory {
   /// Same as 'mixedExecutionModeHashJoinNodeIds' but for Nested Loop Joins.
   folly::F14FastSet<core::PlanNodeId> mixedExecutionModeNestedLoopJoinNodeIds;
 
+  // 定义在LocalPlanner.cpp中
   std::shared_ptr<Driver> createDriver(
       std::unique_ptr<DriverCtx> ctx,
-      std::shared_ptr<ExchangeClient> exchangeClient,
-      std::function<int(int pipelineId)> numDrivers);
+      std::shared_ptr<ExchangeClient> exchangeClient);
 
   /// Replaces operators at indices 'begin' to 'end - 1' with
   /// 'replaceWith, in the Driver being created.  Sets operator ids to be

@@ -95,6 +95,7 @@
     "__memory": "cpp",
     "iterator": "cpp",
     "version": "cpp",
-    "functional": "cpp"
+    "functional": "cpp",
+    "csignal": "cpp"
   }
 }

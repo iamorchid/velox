@@ -54,7 +54,7 @@ Destination::Destination(
 }
 
 BlockingReason Destination::advance(
-    uint64_t maxBytes,
+    uint64_t maxPageSize,
     const std::vector<vector_size_t>& sizes,
     const RowVectorPtr& output,
     const row::CompactRow* outputCompactRow,
@@ -71,7 +71,7 @@ BlockingReason Destination::advance(
   }
 
   const auto firstRow = rowIdx_;
-  const uint32_t adjustedMaxBytes = (maxBytes * targetSizePct_) / 100;
+  const uint32_t adjustedMaxBytes = (maxPageSize * targetSizePct_) / 100;
   if (bytesInCurrent_ >= adjustedMaxBytes) {
     return flush(bufferManager, bufferReleaseFn, future);
   }
@@ -89,6 +89,7 @@ BlockingReason Destination::advance(
   // Serialize
   if (current_ == nullptr) {
     current_ = std::make_unique<VectorStreamGroup>(pool_, serde_);
+    // Type.h: std::dynamic_pointer_cast<const RowType>(type)
     const auto rowType = asRowType(output->type());
     current_->createStreamTree(rowType, rowsInCurrent_, serdeOptions_);
   }
@@ -101,6 +102,8 @@ BlockingReason Destination::advance(
     VELOX_CHECK_NOT_NULL(outputUnsafeRow);
     current_->append(*outputUnsafeRow, rows, sizes);
   } else {
+    // presto serializer的数据格式:
+    // https://prestodb.io/docs/current/develop/serialized-page.html
     VELOX_CHECK_EQ(serde_->kind(), VectorSerde::Kind::kPresto);
     current_->append(output, rows, scratch);
   }
@@ -286,8 +289,12 @@ void PartitionedOutput::initializeSizeBuffers() {
 void PartitionedOutput::estimateRowSizes() {
   const auto numInput = input_->size();
   std::fill(rowSize_.begin(), rowSize_.end(), 0);
+
+  // 参考RawVector.cpp中iota的实现
   raw_vector<vector_size_t> storage;
-  const auto numbers = iota(numInput, storage);
+  const auto numbers = iota(numInput, storage); // const int32_t*
+
+  // 下面的range对应的值为: 0, 1, 2, ..., numInput - 1
   const auto rows = folly::Range(numbers, numInput);
   if (serde_->kind() == VectorSerde::Kind::kCompactRow) {
     VELOX_CHECK_NOT_NULL(outputCompactRow_);
@@ -305,7 +312,7 @@ void PartitionedOutput::estimateRowSizes() {
 }
 
 // Driver在执行完addInput后, 会执行getOutput, 因此不会出现getOutput
-// 没有执行而连续掉用addInput两次的情况.
+// 没有执行而连续调用addInput两次的情况.
 void PartitionedOutput::addInput(RowVectorPtr input) {
   initializeInput(std::move(input));
   initializeDestinations();
@@ -431,9 +438,12 @@ RowVectorPtr PartitionedOutput::getOutput() {
           scratch_);
       if (blockingReason_ != BlockingReason::kNotBlocked) {
         // TODO
-        // 这里的逻辑感觉可以优化下, 后续的destination还是可以继续进行advanced. 否则, 
-        // 后续dedestination中的数据会得不到及时的消费. 即下面的条件不容易满足:
-        // destination->serializedBytes() < kMinDestinationSize
+        // 这里的逻辑感觉可以优化下, 后续的destination还是可以继续进行advanced. 
+        // 否则, 后续dedestination中的数据会得不到及时的消费.
+        // 
+        // 看起来是没法优化了, 所有destination是共用OutputBuffer的bufferedBytes_
+        // 来作为限制的, 即后续destination进行flush时, 也会blocked. 
+        // 参见: OutputBuffer::enqueue
         //
         blockedDestination = destination.get();
         workLeft = false;
@@ -474,6 +484,7 @@ RowVectorPtr PartitionedOutput::getOutput() {
       destination->updateStats(this);
     }
 
+    // 告诉OutputBufferManager, 当前task的一个output driver已经完成了输出.
     bufferManager->noMoreData(operatorCtx_->task()->taskId());
     finished_ = true;
   }
