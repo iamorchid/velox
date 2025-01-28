@@ -96,6 +96,7 @@
     "iterator": "cpp",
     "version": "cpp",
     "functional": "cpp",
-    "csignal": "cpp"
+    "csignal": "cpp",
+    "*.inc": "cpp"
   }
 }

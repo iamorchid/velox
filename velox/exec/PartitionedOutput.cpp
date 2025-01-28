@@ -474,6 +474,7 @@ RowVectorPtr PartitionedOutput::getOutput() {
   // All of 'output_' is written into the destinations. We are finishing, hence
   // move all the destinations to the output queue. This will not grow memory
   // and hence does not need blocking.
+  // 执行Operator::noMoreInput()后, 会设置 noMoreInput_ 为true.
   if (noMoreInput_) {
     for (auto& destination : destinations_) {
       if (destination->isFinished()) {
@@ -485,6 +486,8 @@ RowVectorPtr PartitionedOutput::getOutput() {
     }
 
     // 告诉OutputBufferManager, 当前task的一个output driver已经完成了输出.
+    // 当所有的output drivers都完成了输出后, output buffer就可以往queue中投
+    // 放结束标志了(下游tasks就知道没有更多数据需要读取了).
     bufferManager->noMoreData(operatorCtx_->task()->taskId());
     finished_ = true;
   }

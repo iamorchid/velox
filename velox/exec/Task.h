@@ -1066,7 +1066,7 @@ class Task : public std::enable_shared_from_this<Task> {
   // to pool_ must be defined after pool_, childPools_.
   std::shared_ptr<memory::MemoryPool> pool_;
 
-  // Keep driver and operator memory pools alive for the duration of the task
+  // Keep node and operator memory pools alive for the duration of the task
   // to allow for sharing vectors across drivers without copy.
   std::vector<std::shared_ptr<memory::MemoryPool>> childPools_;
 

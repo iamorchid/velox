@@ -829,11 +829,13 @@ bool MemoryPoolImpl::incrementReservationThreadSafe(
   // first. If it exceeds the capacity and can't grow, the root memory pool will
   // throw an exception to fail the request.
   if (parent_ != nullptr) {
+    // 这里返回false有些误导, 这个函数不可能返回false, 因为parent失败后，会抛出异常
     if (!toImpl(parent_)->incrementReservationThreadSafe(requestor, size)) {
       return false;
     }
   }
 
+  // 对于Leaf MemoryPoolImpl, 将在这里直接返回
   if (maybeIncrementReservation(size)) {
     return true;
   }

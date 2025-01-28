@@ -255,12 +255,12 @@ class BaseVector {
   /// Ensures that nulls are writable (mutable and single referenced for
   /// BaseVector::length_).
   uint64_t* mutableRawNulls() {
-    ensureNulls();
+    ensureNulls(); // <=> ensureNullsCapacity(length_, true);
     return const_cast<uint64_t*>(rawNulls_);
   }
 
   BufferPtr& mutableNulls(vector_size_t size) {
-    ensureNullsCapacity(size);
+    ensureNullsCapacity(size /*, setNotNull = false*/);
     return nulls_;
   }
 

@@ -610,13 +610,13 @@ class RowContainer {
       auto limit = range.size() -
           (reinterpret_cast<uintptr_t>(data) -
            reinterpret_cast<uintptr_t>(range.data()));
-      auto row = iter->rowOffset;
-      while (row + rowSize <= limit) {
-        rows[count++] = data + row +
+      auto rowOffset = iter->rowOffset;
+      while (rowOffset + rowSize <= limit) {
+        rows[count++] = data + rowOffset +
             (iter->normalizedKeysLeft > 0 ? originalNormalizedKeySize_ : 0);
         VELOX_DCHECK_EQ(
             reinterpret_cast<uintptr_t>(rows[count - 1]) % alignment_, 0);
-        row += rowSize;
+        rowOffset += rowSize;
         auto newTotalBytes = totalBytes + rowSize;
         if (--iter->normalizedKeysLeft == 0) {
           rowSize -= originalNormalizedKeySize_;
@@ -642,7 +642,7 @@ class RowContainer {
           totalBytes += variableRowSize(rows[count - 1]);
         }
         if (count == maxRows || totalBytes > maxBytes) {
-          iter->rowOffset = row;
+          iter->rowOffset = rowOffset;
           iter->allocationIndex = i;
           return count;
         }

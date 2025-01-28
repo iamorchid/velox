@@ -277,6 +277,7 @@ std::shared_ptr<Task> Task::create(
       std::move(consumerSupplier),
       memoryArbitrationPriority,
       std::move(onError)));
+  // 这里会创建task级别的MemoryPool, 并为pool设置Task::MemoryReclaimer
   task->initTaskPool();
   task->addToTaskList();
   return task;
@@ -1020,6 +1021,7 @@ void Task::resume(std::shared_ptr<Task> self) {
   if (self->isRunningLocked()) {
     for (auto& driver : self->drivers_) {
       if (driver != nullptr) {
+        // suspended(): state.numSuspensions > 0
         if (driver->state().suspended()) {
           // The Driver will come on thread in its own time as long as
           // the cancel flag is reset. This check needs to be inside 'mutex_'.
@@ -1777,8 +1779,8 @@ void Task::setAllOutputConsumed() {
   {
     std::lock_guard<std::timed_mutex> l(mutex_);
     // TODO 
-    // 既然task的output已经被下有所有的tasks都消费完了, 还有必要
-    // 等到所有drivers都finished吗? 
+    // 既然task的output已经被下有所有的tasks都消费完 (或者提前deleteResults), 
+    // 还有必要等到所有drivers都finished吗? 
     partitionedOutputConsumed_ = true;
     allFinished = checkIfFinishedLocked();
   }
@@ -2879,6 +2881,8 @@ StopReason Task::enterSuspended(ThreadState& state) {
           reason == StopReason::kYield,
       "Unexpected stop reason on suspension: {}",
       reason);
+
+  // suspended(): state.numSuspensions > 0
   if (++state.numSuspensions > 1) {
     // Only the first suspension request needs to update the running driver
     // thread counter in the task.
@@ -2933,6 +2937,8 @@ StopReason Task::leaveSuspended(ThreadState& state) {
   }
 }
 
+// Driver在执行过程中, 会检查task已经被请求stop了, 如果是, 则提前退出loop.
+// 否则, 一直运行, 直到时间片全部用完.
 StopReason Task::shouldStop() {
   if (pauseRequested_) {
     return StopReason::kPause;

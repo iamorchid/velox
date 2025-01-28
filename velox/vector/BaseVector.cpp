@@ -93,8 +93,6 @@ void BaseVector::ensureNullsCapacity(
   } else {
     auto newNulls = AlignedBuffer::allocate<bool>(size, pool_, fill);
     if (nulls_) {
-      // [question]
-      // 这里不用考虑length_没有按照8 bit对齐的特殊情况？
       ::memcpy(
           newNulls->asMutable<char>(),
           nulls_->as<char>(),
@@ -110,7 +108,7 @@ uint64_t BaseVector::byteSize<bool>(vector_size_t count) {
   return bits::nbytes(count);
 }
 
-void BaseVector::resize(vector_size_t size, bool setNotNull) {
+void BaseVector::resize(vector_size_t size, bool setNotNull /* = true */) {
   if (nulls_) {
     const auto bytes = byteSize<bool>(size);
     if (length_ < size || nulls_->isView()) {
@@ -623,7 +621,7 @@ void BaseVector::ensureWritable(const SelectivityVector& rows) {
   // [star][vector] BaseVector::resize
   // resize是一个virtual方法, BaseVector只会处理null bits相关的resize, 而data相关
   // 的resize则由子类实现，可以参考FlatVector-inl.h中resize.
-  this->resize(newSize);
+  this->resize(newSize /*, setNotNull = true */);
   this->resetDataDependentFlags(&rows);
 }
 

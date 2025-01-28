@@ -19,6 +19,8 @@
 
 namespace facebook::velox::exec {
 
+// 对于OrderBy算子而言, 它的output对应的RowType和input是一样的, 即Orderby
+// 算子不会改变数据的schema (RowType中的column的顺序也不会修改).
 SortBuffer::SortBuffer(
     const RowTypePtr& input,
     const std::vector<column_index_t>& sortColumnIndices,
@@ -59,10 +61,10 @@ SortBuffer::SortBuffer(
     sortedSpillColumnNames.emplace_back(input->nameOf(sortColumnIndices.at(i)));
     sortedChannelSet.emplace(sortColumnIndices.at(i));
   }
+
   // Non-sorted key columns.
-  for (column_index_t i = 0, nonSortedIndex = sortCompareFlags_.size();
-       i < input_->size();
-       ++i) {
+  column_index_t nonSortedIndex = sortCompareFlags_.size();
+  for (column_index_t i = 0; i < input_->size(); ++i) {
     if (sortedChannelSet.count(i) != 0) {
       continue;
     }

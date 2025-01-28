@@ -542,9 +542,9 @@ StopReason Driver::runInternal(
     // 1) BlockingReason isBlocked(ContinueFuture* future) // 上游和下游node
     // 2) bool needsInput() // 下游node
     // 3) RowVectorPtr getOutput() // 上游node
-    // 4) void addInput(RowVectorPtr input) // 下游node1
+    // 4) void addInput(RowVectorPtr input) // 下游node
     // 5) bool isFinished() // // 上游node
-    // 6) void noMoreInput() // 下游node1
+    // 6) void noMoreInput() // 下游node
     for (;;) {
       for (int32_t i = numOperators - 1; i >= 0; --i) {
         stop = task()->shouldStop();
@@ -565,6 +565,19 @@ StopReason Driver::runInternal(
         // queuedTime we should update.
         curOperatorId_ = i;
 
+        //
+        // checkUnderArbitration是query级别的 (本节点可能运行了该query的多个tasks), 
+        // 当一个task要进行memory reclaim时, 会先进行Task::requestPause()并等待所有
+        // driver完成go off-thread, 此时该task中的on-thread driver可以在上面的if判
+        // 断(即task()->shouldStop()的返回值)中, 感知到task处于kPause状态. 但是query
+        // 中其他task的drivers还未执行到Task::requestPause, 因为一次仅对一个task进行
+        // memory reclaim, 则通过checkUnderArbitration可以感知到query要进行memory
+        // reclaim操作了。
+        // 
+        // 参考:
+        // 1) QueryCtx::MemoryReclaimer::reclaim
+        // 2) Task::MemoryReclaimer::reclaim
+        //
         if (FOLLY_UNLIKELY(checkUnderArbitration(&future))) {
           // Blocks the driver if the associated query is under memory
           // arbitration as it is very likely the driver run will trigger memory
