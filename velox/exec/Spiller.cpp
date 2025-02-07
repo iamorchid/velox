@@ -522,6 +522,7 @@ void Spiller::runSpill(bool lastRun) {
   std::vector<std::unique_ptr<SpillStatus>> results;
   results.reserve(writes.size());
   for (auto& write : writes) {
+    // write->move()会等待任务执行结束 (底层还是通过promise/future实现)
     results.push_back(write->move());
   }
   for (auto& result : results) {

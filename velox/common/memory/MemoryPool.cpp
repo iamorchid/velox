@@ -491,7 +491,7 @@ MemoryPool::Stats MemoryPoolImpl::statsLocked() const {
 void* MemoryPoolImpl::allocate(int64_t size) {
   CHECK_AND_INC_MEM_OP_STATS(Allocs);
   const auto alignedSize = sizeAlign(size);
-  reserve(alignedSize);
+  reserve(alignedSize /*, reserveOnly = false */);
   void* buffer = allocator_->allocateBytes(alignedSize, alignment_);
   if (FOLLY_UNLIKELY(buffer == nullptr)) {
     release(alignedSize);
@@ -740,6 +740,8 @@ std::shared_ptr<MemoryPool> MemoryPoolImpl::genChild(
           .coreOnAllocationFailureEnabled = coreOnAllocationFailureEnabled_});
 }
 
+// 这里是先将需要的memory pool的reservationBytes_准备好 (可能会执行growCapacity), 
+// 否则, 一点点去增加内存空间, 可能执行一部分操作后才发现超过了内存限制 (导致做了无用功).
 bool MemoryPoolImpl::maybeReserve(uint64_t increment) {
   CHECK_AND_INC_MEM_OP_STATS(Reserves);
   TestValue::adjust(
@@ -762,6 +764,7 @@ bool MemoryPoolImpl::maybeReserve(uint64_t increment) {
   return true;
 }
 
+// 仅当调用maybeReserve时, 才会设置reserveOnly为true
 void MemoryPoolImpl::reserve(uint64_t size, bool reserveOnly) {
   if (FOLLY_LIKELY(trackUsage_)) {
     if (FOLLY_LIKELY(threadSafe_)) {
@@ -786,6 +789,8 @@ void MemoryPoolImpl::reserveThreadSafe(uint64_t size, bool reserveOnly) {
       increment = reservationSizeLocked(size);
       if (increment == 0) {
         if (reserveOnly) {
+          // 这里minReservationBytes_计算看起来有问题, minReservationBytes_应该采用
+          // minReservationBytes_ += size ? 否则, minReservationBytes_可能偏大.
           minReservationBytes_ = tsanAtomicValue(reservationBytes_);
         } else {
           usedReservationBytes_ += size;
@@ -928,6 +933,7 @@ void MemoryPoolImpl::release(uint64_t size, bool releaseOnly) {
   }
 }
 
+// 当前仅当调用MemoryPoolImpl::release()时, releaseOnly才为true
 void MemoryPoolImpl::releaseThreadSafe(uint64_t size, bool releaseOnly) {
   VELOX_CHECK(isLeaf());
   VELOX_DCHECK_NOT_NULL(parent_);
@@ -938,6 +944,7 @@ void MemoryPoolImpl::releaseThreadSafe(uint64_t size, bool releaseOnly) {
     int64_t newQuantized;
     if (FOLLY_UNLIKELY(releaseOnly)) {
       VELOX_DCHECK_EQ(size, 0);
+      // minReservationBytes_为0时, 表示不存在reserveOnly的内存空间
       if (minReservationBytes_ == 0) {
         return;
       }

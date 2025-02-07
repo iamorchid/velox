@@ -47,6 +47,7 @@ class Spiller {
 
   static std::string typeName(Type);
 
+  /// 由MemoryPool.h中StlAllocator定义可以知道, 可以将MemoryPool&隐士转为StlAllocator
   using SpillRows = std::vector<char*, memory::StlAllocator<char*>>;
 
   /// The constructor without specifying hash bits which will only use one
