@@ -480,17 +480,18 @@ class VectorHasher {
       if (int64Value > max_ || int64Value < min_) {
         return kUnmappable;
       }
-      return int64Value - min_ + 1;
+      return int64Value - min_ + 1; // 最小值从1开始, 0留给null
     }
 
     UniqueValue unique(value);
-    unique.setId(uniqueValues_.size() + 1);
+    unique.setId(uniqueValues_.size() + 1); // 最小值从1开始, 0留给null
     auto pair = uniqueValues_.insert(unique);
     if (!pair.second) {
        // value之前已经存在
       return pair.first->id();
     }
-    // 处理新value（此时已经插入uniqueValues_）
+    // 处理新value(此时已经插入uniqueValues_), 除了通过uniqueValues_
+    // 维护distinct values外, 还需要维护value的range范围
     updateRange(int64Value);
     if (uniqueValues_.size() >= rangeSize_) {
       return kUnmappable;

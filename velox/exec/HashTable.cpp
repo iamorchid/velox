@@ -1602,7 +1602,7 @@ void HashTable<ignoreNullKeys>::decideHashMode(
     return;
   }
 
-  // 采用kHash模式时, group keys和hash是多对一的关系
+  // 上面的if检查, 保证了此时rangesWithReserve一定为kRangeTooLarge
   if (distinctsWithReserve == VectorHasher::kRangeTooLarge &&
       rangesWithReserve == VectorHasher::kRangeTooLarge) {
     setHashMode(HashMode::kHash, numNew, spillInputStartPartitionBit);
@@ -1610,6 +1610,10 @@ void HashTable<ignoreNullKeys>::decideHashMode(
   }
 
   // The key concatenation fits in 64 bits.
+  // 走到这里, 说明distinctsWithReserve一定不为kRangeTooLarge, 但bestWithReserve
+  // 还是可能为kRangeTooLarge (因为bestWithReserve可能有rangeSize参与计算得到). 如果
+  // bestWithReserve不为kRangeTooLarge, 则尝试将其他distinceSize替换为rangeSize,
+  // 否则, 全部hasher采用distinctSize来计算normalizeKey.
   if (bestWithReserve != VectorHasher::kRangeTooLarge) {
     enableRangeWhereCan(rangeSizes, distinctSizes, useRange);
   } else {

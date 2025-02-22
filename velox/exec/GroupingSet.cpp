@@ -253,6 +253,9 @@ void GroupingSet::addInputForActiveRows(
   }
 
   table_->groupProbe(*lookup_, BaseHashTable::kNoSpillInputStartPartitionBit);
+
+  // 下面的SQL, 在生成plan时, 为会agg的filter自动转成project
+  // select coordinator, sum(latency) filter (where latency < 1000) from log group by coordinator
   masks_.addInput(input, activeRows_);
 
   auto* groups = lookup_->hits.data();
