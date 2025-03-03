@@ -597,6 +597,8 @@ BlockingReason HashProbe::isBlocked(ContinueFuture* future) {
     case ProbeOperatorState::kWaitForBuild:
       VELOX_CHECK_NULL(table_);
       if (!future_.valid()) {
+        // 这里虽然暂时设置stage为kWaitForBuild, 但如果build table尚未ready,
+        // asyncWaitForHashTable还是会将state设置为kWaitForBuild
         setRunning();
         asyncWaitForHashTable();
       }
@@ -1070,6 +1072,10 @@ RowVectorPtr HashProbe::getOutputInternal(bool toSpillOutput) {
     // output batch, so we need to make extra room of one row in output.
     ++outputTableRowsCapacity_;
   }
+
+  // outputRowMapping_存放的是probe table的行号 (相同的行号可以连续重复,
+  // 比如一个probe行 和多个build table的行关联时). outputTableRows存放的是build
+  // table行信息对应数据指针, 即RowContainer中的row对应的指针.
   auto mapping = initializeRowNumberMapping(
       outputRowMapping_, outputTableRowsCapacity_, pool());
   auto* outputTableRows =
@@ -1348,7 +1354,7 @@ SelectivityVector HashProbe::evalFilterForNullAwareJoin(
   // build-side rows with null keys to see if a filter passes on any of these.
   SelectivityVector nullKeyProbeRows(input_->size(), false);
 
-  // Subset of probe-sie rows with null probe key. We need to combine these
+  // Subset of probe-side rows with null probe key. We need to combine these
   // with all build-side rows to see if a filter passes on any of these.
   SelectivityVector crossJoinProbeRows(input_->size(), false);
 
@@ -1359,25 +1365,41 @@ SelectivityVector HashProbe::evalFilterForNullAwareJoin(
     }
 
     const auto probeRow = rawOutputProbeRowMapping[i];
-    if (nonNullInputRows_.isValid(probeRow)) {
+    if (nonNullInputRows_.isValid(probeRow)) { 
+      // 这种情况下, probeRow的join key不为null
       if (filterPassed(i)) {
+        // probeRow存在对应的buildRow 且 probeRow和buildRow计算filter时为true
         filterPassedRows.setValid(probeRow, true);
       } else {
+        // probeRow不存在buildRow 或者 probeRow和当前关联的buildRow(s)计算filter为false.
+        // 这种情况下, 还需要进一步判断是否存在join key为null的buildRow(s) 且 这些rows中存在
+        // 某些rows和probeRow满足filter. 如果存在, probleRow是否有matched buildRow(s), 
+        // 则是不确定的, 即状态为null.
         nullKeyProbeRows.setValid(probeRow, true);
       }
     } else {
+      // probeRow的join key为null
       crossJoinProbeRows.setValid(probeRow, true);
     }
   }
 
+  // 说明:
+  // null-aware的场景, 比如 select f1 in (select f2 from t2) from t1, 通常
+  // 不会支持多个join key, 即不支持(f1, f2) in (select f3, f4 from t2).
+
   if (buildSideHasNullKeys_) {
+    // 这里要求join的hash key的数量只能为1, 否则对于join key为(k1, ky2)
+    // 的情况, 则存在null keys的情况有4种, 导致寻找具有null key的build行
+    // 的逻辑极为复杂.
     BaseHashTable::NullKeyRowsIterator iter;
     nullKeyProbeRows.deselect(filterPassedRows);
     applyFilterOnTableRowsForNullAwareJoin(
-        nullKeyProbeRows, filterPassedRows, [&](char** data, int32_t maxRows) {
+        nullKeyProbeRows, filterPassedRows, [&](char** data, int32_t maxRows) { 
           return table_->listNullKeyRows(&iter, maxRows, data);
         });
   }
+
+  // 同样, 这里也要求join key只有一个, 否则下面的匹配逻辑就不对了.
   BaseHashTable::RowsIterator iter;
   crossJoinProbeRows.deselect(filterPassedRows);
   applyFilterOnTableRowsForNullAwareJoin(
@@ -1400,6 +1422,7 @@ int32_t HashProbe::evalFilter(int32_t numRows) {
       outputRowMapping_->asMutable<vector_size_t>();
   auto* outputTableRows = outputTableRows_->asMutable<char*>();
 
+  // 这个字段是控制哪些probe行可以参与filter计算
   filterInputRows_.resizeFill(numRows);
 
   // Do not evaluate filter on rows with no match to (1) avoid
@@ -1419,6 +1442,7 @@ int32_t HashProbe::evalFilter(int32_t numRows) {
   RowVectorPtr filterInput = createFilterInput(numRows);
 
   if (nullAware_) {
+    // 这个函数会更新filterInputRows_(控制哪些probe行可以参与filter计算)
     prepareFilterRowsForNullAwareJoin(
         filterInput, numRows, filterPropagateNulls);
   }
@@ -1517,6 +1541,14 @@ int32_t HashProbe::evalFilter(int32_t numRows) {
         // filterPassed(i) -> TRUE
         // else passed -> NULL
         // else FALSE
+        // 1) filterPassed(i)为true
+        //    probeRow存在buildRow (显然它们不可能包含null join key) 且 filter(probeRow, buildRow)为true
+        // 2) passedRows.isValid(probeRow)为true
+        //    probeRow或者buildRow存在null的join key 且 filter(probeRow, buildRow)为true, 这种情况下不能
+        //    确定probeRow是否存在对应的buildRow (此时语义对应null, 即不确定)
+        // 3) 其他
+        //    ...
+
         auto probeRow = rawOutputProbeRowMapping[i];
         std::optional<bool> passed = filterPassed(i)
             ? std::optional(true)
@@ -1534,6 +1566,7 @@ int32_t HashProbe::evalFilter(int32_t numRows) {
             passed.value() ? const_cast<char*>(kPassed) : nullptr;
         rawOutputProbeRowMapping[numPassed++] = row;
       };
+      // leftSemiProjectJoinTracker_作用是从probe结果集outputRowMapping_中去掉重复的行
       for (auto i = 0; i < numRows; ++i) {
         leftSemiProjectJoinTracker_.advance(
             rawOutputProbeRowMapping[i], filterPassed(i), addLast);

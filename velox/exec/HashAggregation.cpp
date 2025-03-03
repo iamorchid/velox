@@ -40,6 +40,7 @@ HashAggregation::HashAggregation(
       aggregationNode_(aggregationNode),
       isPartialOutput_(isPartialOutput(aggregationNode->step())),
       isGlobal_(aggregationNode->groupingKeys().empty()),
+      // 形如: select key1, key2 from log group by key1, key2
       isDistinct_(!isGlobal_ && aggregationNode->aggregates().empty()),
       maxExtendedPartialAggregationMemoryUsage_(
           driverCtx->queryConfig().maxExtendedPartialAggregationMemoryUsage()),
@@ -190,6 +191,9 @@ void HashAggregation::addInput(RowVectorPtr input) {
   // NOTE: we should not trigger partial output flush in case of global
   // aggregation as the final aggregator will handle it the same way as the
   // partial aggregator. Hence, we have to use more memory anyway.
+  // 对于如下SQL, partial agg提前abandon没有任何意义, 因为最终final agg还是逃避
+  // 不了汇总完整的数据结果 (final agg只能有一个task进行汇总).
+  // select select array_agg(distinct(queryId)) from log
   const bool abandonPartialEarly = isPartialOutput_ && !isGlobal_ &&
       abandonPartialAggregationEarly(groupingSet_->numDistinct());
   if (isPartialOutput_ && !isGlobal_ &&
@@ -286,6 +290,7 @@ void HashAggregation::maybeIncreasePartialAggregationMemoryUsage(
   VELOX_DCHECK(isPartialOutput_);
   // If size is at max and there still is not enough reduction, abandon partial
   // aggregation.
+  // 对于高基数场景, 如果聚合减少的行数不够多, 则关闭partial agg
   if (abandonPartialAggregationEarly(numOutputRows_) ||
       (aggregationPct > kPartialMinFinalPct &&
        maxPartialAggregationMemoryUsage_ >=

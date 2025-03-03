@@ -263,9 +263,22 @@ RowVectorPtr NestedLoopJoinProbe::generateOutput() {
     finishProbeInput();
   }
 
-  if (output_ != nullptr && output_->size() == 0) {
-    output_ = nullptr;
+  // 对于非cross-join, 需要避免每行都执行prepareOutput操作 (创建output_对象).
+  // cross-join操作没有这个问题, 因为它不会执行prepareOutput.
+  if (!isCrossJoin()) {
+    if (input_ != nullptr && numOutputRows_ < outputBatchSize_) {
+      return nullptr;
+    }
   }
+
+  if (output_ != nullptr) {
+    if (numOutputRows_ > 0) {
+      output_->resize(numOutputRows_);
+    } else {
+      output_ = nullptr;
+    }
+  }
+
   return std::move(output_);
 }
 
@@ -357,9 +370,6 @@ bool NestedLoopJoinProbe::addToOutput() {
   // Check if the current probed row needs to be added as a mismatch (for left
   // and full outer joins).
   checkProbeMismatchRow();
-  if (output_ != nullptr) {
-    output_->resize(numOutputRows_);
-  }
 
   // Signals that all input has been generated for the probeRow and build
   // vectors; safe to move to the next probe record.
@@ -372,6 +382,7 @@ void NestedLoopJoinProbe::prepareOutput() {
   }
   std::vector<VectorPtr> localColumns(outputType_->size());
 
+  // 作为全局函数定义在BaseVector.h文件中
   probeOutputIndices_ = allocateIndices(outputBatchSize_, pool());
   rawProbeOutputIndices_ = probeOutputIndices_->asMutable<vector_size_t>();
 
@@ -405,6 +416,7 @@ void NestedLoopJoinProbe::evaluateJoinFilter(const RowVectorPtr& buildVector) {
       filterBuildProjections_);
 
   if (filterInputRows_.size() != filterInput->size()) {
+    // 调整SelectivityVector的大小, 并将所有bits设置为true
     filterInputRows_.resizeFill(filterInput->size(), true);
   }
   VELOX_CHECK(filterInputRows_.isAllSelected());

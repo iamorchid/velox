@@ -1909,6 +1909,7 @@ int32_t HashTable<ignoreNullKeys>::listJoinResults(
         }
         totalBytes += (iter.fixedSizeListColumnsSizeSum * numRows);
       }
+      // 当前probe行关联的多个build行都已经处理完毕, 移到下一个probe行
       if (iter.lastDuplicateRowIndex >= numRows) {
         iter.lastDuplicateRowIndex = 0;
         iter.lastRowIndex++;
@@ -2266,6 +2267,7 @@ void HashTable<ignoreNullKeys>::prepareForGroupProbe(
     }
   }
 
+  // 将SelectivityVector中true对应的bits(即位图)转成具体的行号vector
   populateLookupRows(rows, lookup.rows);
 }
 
@@ -2294,6 +2296,8 @@ void HashTable<ignoreNullKeys>::prepareForJoinProbe(
     auto& hasher = hashers[i];
     if (mode != BaseHashTable::HashMode::kHash) {
       auto& key = input->childAt(hasher->channel());
+      // 如果某些probe行在build table的VectorHasher中找不到对应的valueId, 
+      // 则这里会自动将这些行从SelectivityVector清除.
       hashers_[i]->lookupValueIds(
           *key, rows, lookup.scratchMemory, lookup.hashes);
     } else {
@@ -2301,6 +2305,7 @@ void HashTable<ignoreNullKeys>::prepareForJoinProbe(
     }
   }
 
+  // 将SelectivityVector中true对应的bits(即位图)转成具体的行号vector
   populateLookupRows(rows, lookup.rows);
 }
 
