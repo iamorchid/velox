@@ -47,6 +47,7 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
       const SelectivityVector& rows,
       const std::vector<VectorPtr>& args,
       bool /*mayPushdown*/) override {
+    // count(*)场景
     if (args.empty()) {
       rows.applyToSelected([&](vector_size_t i) { addToGroup(groups[i], 1); });
       return;
