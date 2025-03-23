@@ -275,6 +275,10 @@ void GroupingSet::addInputForActiveRows(
     // 当agg定义filter后, 不同的agg操作的rows不一样
     const auto& rows = getSelectivityVector(i);
 
+    // 虽然distinct的聚合操作在plan优化过程中, 通常会被转换成MarkDistinct. 但velox的
+    // 聚合操作原生是支持distinct处理的, 这里会先将input中对应的column值收集到set集合, 
+    // getOutput中将set中的内容转成vector, 然后再执行真正的聚合函数.
+    // select key1, sum(distinct key2), count(key3) from log group by key1
     if (aggregates_[i].distinct) {
       if (!newGroups.empty()) {
         distinctAggregations_[i]->initializeNewGroups(groups, newGroups);
@@ -286,6 +290,14 @@ void GroupingSet::addInputForActiveRows(
       continue;
     }
 
+    //
+    // 从下面的SQL可以看到, 即使rows没有任何结果时, 对每个new group, 我们也必须进行初始化.
+    // 在初始化new group时, 会设置其null bits, 且仅当这个group中row添加时, 才会清除.
+    //
+    // queryState: * | select coordinator, avg(latency) filter(where coordinator = 'xyz') as l from log group by 1
+    // coordinator                   l
+    // 11.118.134.147:12007          null
+    // 10.111.65.245:12007           null
     auto& function = aggregates_[i].function;
     if (!newGroups.empty()) {
       function->initializeNewGroups(groups, newGroups);
@@ -312,6 +324,8 @@ void GroupingSet::addInputForActiveRows(
   }
   tempVectors_.clear();
 
+  // 上面for循环中, 不会执行sortedAggregations_, 这里单独进行处理
+  // select linenumber, array_agg(orderkey order by orderkey) from lineitem where orderkey < 10 group by linenumber
   if (sortedAggregations_) {
     if (!newGroups.empty()) {
       sortedAggregations_->initializeNewGroups(groups, newGroups);
@@ -805,9 +819,12 @@ void GroupingSet::extractGroups(
     auto& function = aggregates_[i].function;
     auto& aggregateVector = result->childAt(i + totalKeys);
     if (isPartial_) {
+      // produce intermediate results from the accumulator
       function->extractAccumulators(
           groups.data(), groups.size(), &aggregateVector);
     } else {
+      // produce final results from the accumulator
+      // TODO 这里应排除aggregates_[i].distinct为true的情况
       function->extractValues(groups.data(), groups.size(), &aggregateVector);
     }
   }

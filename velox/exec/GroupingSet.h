@@ -156,6 +156,7 @@ class GroupingSet {
 
  private:
   bool isDistinct() const {
+    // select k1, k2 from tbl group by k1, k2
     return aggregates_.empty();
   }
 
