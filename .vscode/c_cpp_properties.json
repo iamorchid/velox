@@ -31,7 +31,10 @@
             "compilerPath": "/usr/bin/clang",
             "cStandard": "c17",
             "cppStandard": "c++17",
-            "intelliSenseMode": "macos-clang-x64"
+            "intelliSenseMode": "macos-clang-x64",
+            "compileCommands": [
+                "/Users/chuzhi.zj/workerspace/velox/_build/release/compile_commands.json"
+            ]
         }
     ],
     "version": 4

@@ -35,6 +35,9 @@ void ExchangeClient::addRemoteTaskId(const std::string& remoteTaskId) {
 
     std::shared_ptr<ExchangeSource> source;
     try {
+      // remoteTaskId的格式如下 (bufferId和destination_是一致的):
+      // http://192.168.1.7:8080/v1/task/20221119_022459_00010_cdbxc.1.0.0/results/0
+      // http://192.168.1.7:8080/v1/task/{上游taskId}/results/{bufferId}
       source =
           ExchangeSource::create(remoteTaskId, destination_, queue_, pool_);
     } catch (const VeloxException&) {
