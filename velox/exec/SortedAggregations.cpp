@@ -36,7 +36,11 @@ struct RowPointers {
       allocator.extendWrite(currentBlock, stream);
     }
 
+    // currentBlock空间不够时, 会自动调用HashStringAllocator::newRange,
+    // 内部会更新HashStringAllocator中的state_.currentHeader(). 其中, 
+    // 所有的分配的blocks可以通过firstBlock找到(以非连续的方式组织).
     stream.appendOne(reinterpret_cast<uintptr_t>(row));
+  
     currentBlock = allocator.finishWrite(stream, 1024).second;
 
     ++size;
