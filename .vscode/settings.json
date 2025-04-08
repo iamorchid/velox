@@ -97,6 +97,12 @@
     "version": "cpp",
     "functional": "cpp",
     "csignal": "cpp",
-    "*.inc": "cpp"
+    "*.inc": "cpp",
+    "execution": "cpp",
+    "print": "cpp",
+    "hash_map": "cpp",
+    "hash_set": "cpp",
+    "cfenv": "cpp",
+    "source_location": "cpp"
   }
 }

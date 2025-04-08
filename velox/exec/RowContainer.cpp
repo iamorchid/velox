@@ -598,6 +598,8 @@ void RowContainer::store(
         row,
         offsets_[columnIndex]);
   } else {
+    // 只能对key或者dependent列进行store操作, 聚合列只允许聚合函数自己
+    // 进行初始化以及内部状态维护, 不允许通过store直接进行列设置.
     VELOX_DCHECK(isKey || accumulators_.empty());
     auto rowColumn = rowColumns_[columnIndex];
     VELOX_DYNAMIC_TYPE_DISPATCH_ALL(

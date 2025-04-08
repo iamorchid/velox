@@ -17,6 +17,7 @@
 
 namespace facebook::velox::exec {
 
+// static
 std::shared_ptr<ExchangeSource> ExchangeSource::create(
     const std::string& remoteTaskId,
     int destination,
