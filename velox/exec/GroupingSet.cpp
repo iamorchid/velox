@@ -58,13 +58,16 @@ GroupingSet::GroupingSet(
     : preGroupedKeyChannels_(std::move(preGroupedKeys)),
       groupingKeyOutputProjections_(std::move(groupingKeyOutputProjections)),
       hashers_(std::move(hashers)),
+      // isGlobal_对应group keys为空
       isGlobal_(hashers_.empty()),
       isPartial_(isPartial),
       isRawInput_(isRawInput),
       queryConfig_(operatorCtx->task()->queryCtx()->queryConfig()),
       aggregates_(std::move(aggregates)),
-      masks_(extractMaskChannels(aggregates_)),
+      // project会为agg的filter准备好mask column
+      masks_(extractMaskChannels(aggregates_)), 
       ignoreNullKeys_(ignoreNullKeys),
+      // select coordinator, count(*) as cnt from log group by grouping sets((),(coordinator))
       globalGroupingSets_(globalGroupingSets),
       groupIdChannel_(groupIdChannel),
       spillConfig_(spillConfig),
@@ -103,6 +106,7 @@ GroupingSet::GroupingSet(
         allAreSinglyReferenced(aggregate.inputs, channelUseCount));
   }
 
+  // 由SortedAggregations::create知道, 当前不支持同时sorted和distinct的agg操作
   sortedAggregations_ =
       SortedAggregations::create(aggregates_, inputType, &pool_);
   if (isPartial_) {
@@ -183,6 +187,9 @@ void GroupingSet::addInput(const RowVectorPtr& input, bool mayPushdown) {
     if (remainingInput_) {
       addRemainingInput();
     }
+    // 从后往前进行对比, 发现input中后面的rows和之前的rows存在不一样的group, 那么
+    // 之前的rows聚合结果就可以先输出了 (streaming的方式保证了后续的rows不会和先前
+    // 已经输出的rows存在相同的groups).
     // Look for the last group of pre-grouped keys.
     for (auto i = input->size() - 2; i >= 0; --i) {
       if (!equalKeys(preGroupedKeyChannels_, input, i, i + 1)) {
@@ -246,6 +253,8 @@ void GroupingSet::addInputForActiveRows(
   TestValue::adjust(
       "facebook::velox::exec::GroupingSet::addInputForActiveRows", this);
 
+  // 为activeRows_计算hash(kHash模式)或者valueId(kArray或者kNormalizedKey模式).
+  // 其中, kNormalizedKey模式可以认为是优化版的kHash模式.
   table_->prepareForGroupProbe(
       *lookup_,
       input,
@@ -257,6 +266,7 @@ void GroupingSet::addInputForActiveRows(
     return;
   }
 
+  // 基于上面计算出的hash或者valueId, 为activeRows_获取已存在的group或者创建新的group
   table_->groupProbe(*lookup_, BaseHashTable::kNoSpillInputStartPartitionBit);
 
   // 下面的SQL, 在生成plan时, 为会agg的filter自动转成bool类型的project字段,
@@ -291,8 +301,9 @@ void GroupingSet::addInputForActiveRows(
     }
 
     //
-    // 从下面的SQL可以看到, 即使rows没有任何结果时, 对每个new group, 我们也必须进行初始化.
-    // 在初始化new group时, 会设置其null bits, 且仅当这个group中row添加时, 才会清除.
+    // 从下面的SQL可以看到, agg的filter执行之后, 即使rows没有任何结果时, 对每个new group, 
+    // 我们也必须进行初始化. 在初始化new group时, 会设置其null bits, 且仅当这个group中row
+    // 添加时, 才会清除 (参考AverageAggrageteBase.h).
     //
     // queryState: * | select coordinator, avg(latency) filter(where coordinator = 'xyz') as l from log group by 1
     // coordinator                   l
@@ -325,7 +336,7 @@ void GroupingSet::addInputForActiveRows(
   tempVectors_.clear();
 
   // 上面for循环中, 不会执行sortedAggregations_, 这里单独进行处理
-  // select linenumber, array_agg(orderkey order by orderkey) from lineitem where orderkey < 10 group by linenumber
+  // select linenumber, array_agg(orderkey order by orderkey) filter (where linenumber <= 5) from lineitem where orderkey < 10 group by linenumber
   if (sortedAggregations_) {
     if (!newGroups.empty()) {
       sortedAggregations_->initializeNewGroups(groups, newGroups);
@@ -665,6 +676,9 @@ bool GroupingSet::getDefaultGlobalGroupingSetOutput(
     return false;
   }
 
+  // result->type()对应的schema包含了grouping keys, 但getGlobalAggregationOutput
+  // 仅仅会填充aggregates对应的columns. 下面会进一步为group keys以及groupId columns
+  // 填充合理的值.
   auto globalAggregatesRow =
       BaseVector::create<RowVector>(result->type(), 1, &pool_);
 
@@ -768,6 +782,7 @@ bool GroupingSet::getOutput(
     return getGlobalAggregationOutput(iterator, result);
   }
 
+  // 对于global grouping set, 即使在没有任何输入rows的情况下, 也需要输出
   if (hasDefaultGlobalGroupingSetOutput()) {
     return getDefaultGlobalGroupingSetOutput(iterator, result);
   }
