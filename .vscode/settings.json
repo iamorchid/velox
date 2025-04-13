@@ -103,6 +103,9 @@
     "hash_map": "cpp",
     "hash_set": "cpp",
     "cfenv": "cpp",
-    "source_location": "cpp"
+    "source_location": "cpp",
+    "__availability": "cpp",
+    "barrier": "cpp",
+    "semaphore": "cpp"
   }
 }

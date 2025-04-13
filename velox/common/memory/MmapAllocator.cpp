@@ -117,6 +117,7 @@ bool MmapAllocator::allocateNonContiguousWithoutRetry(
       VELOX_MEM_LOG(WARNING) << errorMsg;
       setAllocatorFailureMessage(errorMsg);
       const auto failedPages = sizeMix.totalPages - out.numPages();
+      // freeNonContiguous会自动根据out中释放的pages来调整numAllocated_
       freeNonContiguous(out);
       numAllocated_.fetch_sub(failedPages);
       return false;
@@ -514,7 +515,7 @@ MmapAllocator::SizeClass::SizeClass(size_t capacity, MachinePageCount unitSize)
       unitSize_(unitSize),
       byteSize_(AllocationTraits::pageBytes(capacity_ * unitSize_)),
       pageBitmapSize_(capacity_ / 64),
-      // Min 8 words + 1 bit for every 512 bits in 'pageAllocated_'.
+      // Min 8 words + 1 bit for every N*128 bits in 'pageAllocated_'.
       mappedFreeLookup_((capacity_ / kPagesPerLookupBit / 64) + kSimdTail),
       pageAllocated_(pageBitmapSize_ + kSimdTail),
       pageMapped_(pageBitmapSize_ + kSimdTail) {

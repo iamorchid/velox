@@ -220,7 +220,7 @@ HashStringAllocator::finishWrite(
   VELOX_CHECK_NOT_NULL(
       state_.currentHeader(),
       "Must call newWrite or extendWrite before finishWrite");
-  auto* writePosition = stream.writePosition();
+  char* writePosition = stream.writePosition();
   const auto offset = writePosition - state_.currentHeader()->begin();
 
   VELOX_CHECK_GE(
@@ -260,12 +260,14 @@ HashStringAllocator::finishWrite(
 void HashStringAllocator::newSlab() {
   //
   // slab的layout, 其中kHeaderSize部分用于存放end marker
-  // |<-- available -->|<-- kHeaderSize -->|<-- kSimdPadding -->|
+  // |<-- available -->|<-- kHeaderSize -->|<-- padding -->|
   // 
   // available部分又可以细分为:
   // |<-- Header -->|<-- data -->|
   //
   constexpr int32_t kSimdPadding = simd::kPadding - kHeaderSize;
+
+  // state_.pool()对应的是AllocationPool, 不是MemoryPool
   const int64_t needed =
       state_.pool().allocatedBytes() >= state_.pool().hugePageThreshold()
       ? memory::AllocationTraits::kHugePageSize

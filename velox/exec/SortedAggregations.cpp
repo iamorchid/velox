@@ -152,6 +152,7 @@ Accumulator SortedAggregations::accumulator() const {
       false,
       1,
       ARRAY(VARBINARY()),
+      // query可用的内存不足时才会进行spill, 但这里的ArrayVector需要分配额外的内存空间?
       [this](folly::Range<char**> groups, VectorPtr& result) {
         extractForSpill(groups, result);
       },
