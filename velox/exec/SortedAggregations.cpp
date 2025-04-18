@@ -149,6 +149,9 @@ Accumulator SortedAggregations::accumulator() const {
   return {
       false,
       sizeof(RowPointers),
+      // false表示没有用到外部memory, 可以仅仅使用row container内部管理的memory,
+      // 比如这里用到的HashStringAllocator. 这种情况下, 在RowContainer析构时, 
+      // 就没有必要执行agg的destroy函数了.
       false,
       1,
       ARRAY(VARBINARY()),

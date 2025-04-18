@@ -826,8 +826,9 @@ void MemoryPoolImpl::reserveThreadSafe(uint64_t size, bool reserveOnly) {
       increment = reservationSizeLocked(size);
       if (increment == 0) {
         if (reserveOnly) {
-          // 这里minReservationBytes_计算看起来有问题, minReservationBytes_应该采用
-          // minReservationBytes_ += size ? 否则, minReservationBytes_可能偏大.
+          // 提前预留好固定的大小的空间, 同时不希望普通的release(即releaseOnly为false)
+          // 将预留的空间释放出去. 这样做是为了保证后续的操作有可用的内存 (避免操作执行到
+          // 一半时, 因为内存申请而失败).
           minReservationBytes_ = tsanAtomicValue(reservationBytes_);
         } else {
           usedReservationBytes_ += size;
