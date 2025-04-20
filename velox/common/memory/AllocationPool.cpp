@@ -82,6 +82,7 @@ void AllocationPool::maybeGrowLastAllocation(uint64_t bytesRequested) {
     VELOX_CHECK_GT(bytesInRun_, AllocationTraits::kHugePageSize);
     const auto bytesToReserve = bits::roundUp(
         updateOffset - endOfReservedRun(), AllocationTraits::kHugePageSize);
+    // 这里会增加ContiguousAllocation的size_大小, 同时为新增的大小进行reserve操作
     largeAllocations_.back().grow(AllocationTraits::numPages(bytesToReserve));
     usedBytes_ += bytesToReserve;
   }
@@ -104,7 +105,7 @@ void AllocationPool::newRunImpl(MachinePageCount numPages) {
                 usedBytes_ + AllocationTraits::kHugePageSize)));
     // Round 'numPages' to no of pages in huge page. Allocating this plus an
     // extra huge page guarantees that 'numPages' worth of contiguous aligned
-    // huge pages will be founfd in the allocation.
+    // huge pages will be found in the allocation.
     numPages = bits::roundUp(numPages, AllocationTraits::numPagesInHugePage());
     if (AllocationTraits::pageBytes(numPages) +
             AllocationTraits::kHugePageSize >
@@ -120,11 +121,26 @@ void AllocationPool::newRunImpl(MachinePageCount numPages) {
     pool_->allocateContiguous(
         pagesToAlloc, largeAlloc, AllocationTraits::numPages(nextSize));
 
-    auto range = largeAlloc.hugePageRange().value();
-    startOfRun_ = range.data();
-    bytesInRun_ = range.size();
-    largeAllocations_.emplace_back(std::move(largeAlloc));
+    //
+    // 对于ContiguousAllocation(即对应大块内存), 虽然请求的内存大小为pagesToAlloc, 但
+    // 实际上会向os分配更大的虚拟内存, 此时os并没有为这些内存分配物理内存, 同时MemoryPool
+    // 仅仅为pagesToAlloc大小的内存进行过reserve操作, 调用方只允许访问这块reserve过的内存
+    // 区域. 
+    //
+    // 当调用方需下次要继续分配内存时, 此时可以不需要再次向os申请虚拟内存了, 而可以直接使用
+    // 之前预分配好的虚拟内存, 但调用方在真正使用这些内存之前, 也必须进行reserve操作, 避
+    // 免超过它的内存quota (见maybeGrowLastAllocation).
+    // 
+    auto range = largeAlloc.hugePageRange().value(); // 虚拟内存的实际range
+    startOfRun_ = range.data();                      // 虚拟内存的start
+    bytesInRun_ = range.size();                      // 虚拟内存的实际大小(比如pagesToAlloc大)
     currentOffset_ = 0;
+
+    // ContiguousAllocation中的size对应的是pagesToAlloc(即512个page或2MB字节), 
+    // maxSize对应的是虚拟内存的实际大小.
+    largeAllocations_.emplace_back(std::move(largeAlloc));
+
+    // 此时, memory pool仅仅为numPages的内存进行过reserve操作
     usedBytes_ += AllocationTraits::pageBytes(pagesToAlloc);
     return;
   }
@@ -132,7 +148,11 @@ void AllocationPool::newRunImpl(MachinePageCount numPages) {
   Allocation allocation;
   auto roundedPages = std::max<int32_t>(kMinPages, numPages);
   pool_->allocateNonContiguous(roundedPages, allocation, roundedPages);
+
+  // 上面allocateNonContiguous是怎么保证PageRun只有一个的? 通过第三个参数
+  // 限定了分配的最小PageRun包好的pages个数 (只需要一个PageRun).
   VELOX_CHECK_EQ(allocation.numRuns(), 1);
+
   startOfRun_ = allocation.runAt(0).data<char>();
   bytesInRun_ = allocation.runAt(0).numBytes();
   currentOffset_ = 0;

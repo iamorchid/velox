@@ -90,6 +90,8 @@ void HashStringAllocator::clear() {
   state_.freeBytes() = 0;
   std::fill(
       std::begin(state_.freeNonEmpty()), std::end(state_.freeNonEmpty()), 0);
+
+  // 释放从MemoryPool中直接分配的大块空间
   for (auto& pair : state_.allocationsFromPool()) {
     const auto size = pair.second;
     pool()->free(pair.first, size);
@@ -97,6 +99,7 @@ void HashStringAllocator::clear() {
     state_.currentBytes() -= size;
   }
   state_.allocationsFromPool().clear();
+
   for (auto i = 0; i < kNumFreeLists; ++i) {
     new (&state_.freeLists()[i]) CompactDoubleList();
   }
@@ -220,7 +223,7 @@ HashStringAllocator::finishWrite(
   VELOX_CHECK_NOT_NULL(
       state_.currentHeader(),
       "Must call newWrite or extendWrite before finishWrite");
-  auto* writePosition = stream.writePosition();
+  char* writePosition = stream.writePosition();
   const auto offset = writePosition - state_.currentHeader()->begin();
 
   VELOX_CHECK_GE(
@@ -258,7 +261,16 @@ HashStringAllocator::finishWrite(
 }
 
 void HashStringAllocator::newSlab() {
+  //
+  // slab的layout, 其中kHeaderSize部分用于存放end marker
+  // |<-- available -->|<-- kHeaderSize -->|<-- kSimdPadding -->|
+  // 
+  // available部分又可以细分为:
+  // |<-- Header -->|<-- data -->|
+  //
   constexpr int32_t kSimdPadding = simd::kPadding - kHeaderSize;
+
+  // state_.pool()对应的是AllocationPool, 不是MemoryPool
   const int64_t needed =
       state_.pool().allocatedBytes() >= state_.pool().hugePageThreshold()
       ? memory::AllocationTraits::kHugePageSize
@@ -344,6 +356,10 @@ StringView HashStringAllocator::contiguousString(
   return StringView(storage);
 }
 
+  // |<--kHeaderSize-->|<----------------AvailableSize--------------->|
+  //                             ||
+  //                             \/
+  // |<--kHeaderSize-->|<--keepBytes-->|--kHeaderSize-->|--freeSize-->|
 void HashStringAllocator::freeRestOfBlock(Header* header, int32_t keepBytes) {
   keepBytes = std::max(keepBytes, kMinAlloc);
   const int32_t freeSize = header->size() - keepBytes - kHeaderSize;
@@ -456,6 +472,8 @@ void HashStringAllocator::free(Header* header) {
       VELOX_CHECK(!headerToFree->isFree());
       state_.freeBytes() += blockBytes(headerToFree);
       state_.currentBytes() -= blockBytes(headerToFree);
+
+      // 和后面的free block进行合并
       Header* next = headerToFree->next();
       if (next != nullptr) {
         VELOX_CHECK(!next->isPreviousFree());
@@ -468,6 +486,8 @@ void HashStringAllocator::free(Header* header) {
           VELOX_CHECK(next->isArenaEnd() || !next->isFree());
         }
       }
+
+      // 和前面的free block进行合并
       if (headerToFree->isPreviousFree()) {
         auto* previousFree = getPreviousFree(headerToFree);
         removeFromFreeList(previousFree);
@@ -478,11 +498,14 @@ void HashStringAllocator::free(Header* header) {
       } else {
         ++state_.numFree();
       }
+
       const auto freedSize = headerToFree->size();
       const auto freeIndex = freeListIndex(freedSize);
       bits::setBit(state_.freeNonEmpty(), freeIndex);
       state_.freeLists()[freeIndex].insert(
           reinterpret_cast<CompactDoubleList*>(headerToFree->begin()));
+      
+      // 将当前block设置为free状态, 它会直接相邻的block设置kPreviousFree状态
       markAsFree(headerToFree);
     }
     headerToFree = continued;

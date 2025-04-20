@@ -826,8 +826,9 @@ void MemoryPoolImpl::reserveThreadSafe(uint64_t size, bool reserveOnly) {
       increment = reservationSizeLocked(size);
       if (increment == 0) {
         if (reserveOnly) {
-          // 这里minReservationBytes_计算看起来有问题, minReservationBytes_应该采用
-          // minReservationBytes_ += size ? 否则, minReservationBytes_可能偏大.
+          // 提前预留好固定的大小的空间, 同时不希望普通的release(即releaseOnly为false)
+          // 将预留的空间释放出去. 这样做是为了保证后续的操作有可用的内存 (避免操作执行到
+          // 一半时, 因为内存申请而失败).
           minReservationBytes_ = tsanAtomicValue(reservationBytes_);
         } else {
           usedReservationBytes_ += size;
@@ -916,6 +917,10 @@ bool MemoryPoolImpl::maybeIncrementReservation(uint64_t size) {
     // arbitration process. The memory arbitration process itself needs to
     // ensure the memory pool usage of the memory pool is within the capacity
     // limit after the arbitration operation completes.
+    //
+    // underMemoryArbitration()为true时, 表明query当前处于reclaim状态, 此时需要
+    // 允许spill操作本身分配内存成功 (query中的所有tasks已经被pause).
+    //
     if (FOLLY_UNLIKELY(
             (reservationBytes_ + size > capacity_) &&
             !underMemoryArbitration())) {

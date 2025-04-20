@@ -18,7 +18,7 @@
 #include "velox/common/memory/Memory.h"
 
 namespace facebook::velox::memory {
-/// A set of Allocations holding the fixed width payload ows. The Runs are
+/// A set of Allocations holding the fixed width payload rows. The Runs are
 /// filled to the end except for the last one. This is used for iterating over
 /// the payload for rehashing, returning results etc. This is used via
 /// HashStringAllocator for variable length allocation for backing ByteStreams
@@ -63,6 +63,8 @@ class AllocationPool {
   }
 
   /// Returns the number of bytes allocatable without growing 'this'.
+  /// 这里freeBytes不能直接使用freeAddressableBytes进行替代, 因为对于ContiguousAllocation,
+  /// freeAddressableBytes包含了MemoryPool尚未reverse过的虚拟空间大小.
   int64_t freeBytes() const {
     if (largeAllocations_.empty()) {
       return freeAddressableBytes();
@@ -89,7 +91,7 @@ class AllocationPool {
     return pool_;
   }
 
-  /// Returns true if 'ptr' is inside the range allocations are made from.
+  /// Returns true if 'ptr' is inside the range from which allocations are made.
   bool isInCurrentRange(void* ptr) const {
     return reinterpret_cast<char*>(ptr) >= startOfRun_ &&
         reinterpret_cast<char*>(ptr) < startOfRun_ + bytesInRun_;
@@ -114,7 +116,7 @@ class AllocationPool {
 
   // Returns the offset from 'startOfRun_' after which the last large
   // allocation must be grown. There are mapped addresses all the way
-  // to 'bytesInRun_' ut they are not marked used by the
+  // to 'bytesInRun_' but they are not marked used by the
   // pool/allocator. So use growContiguous() to update this.
   int64_t endOfReservedRun() {
     if (largeAllocations_.empty()) {

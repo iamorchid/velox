@@ -81,6 +81,7 @@ m4/lt~obsolete.m4
 #m4/
 build/
 _build/
+_build
 .ccache/
 ccache/
 #*.m4

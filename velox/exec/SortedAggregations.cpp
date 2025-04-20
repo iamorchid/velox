@@ -36,7 +36,11 @@ struct RowPointers {
       allocator.extendWrite(currentBlock, stream);
     }
 
+    // currentBlock空间不够时, 会自动调用HashStringAllocator::newRange,
+    // 内部会更新HashStringAllocator中的state_.currentHeader(). 其中, 
+    // 所有的分配的blocks可以通过firstBlock找到(以非连续的方式组织).
     stream.appendOne(reinterpret_cast<uintptr_t>(row));
+  
     currentBlock = allocator.finishWrite(stream, 1024).second;
 
     ++size;
@@ -92,6 +96,7 @@ SortedAggregations::SortedAggregations(
   for (auto input : allInputs) {
     types.push_back(inputType->childAt(input));
 
+    // 将上游input的column channel, 映射为inputData_(即RowContainer)对应的key index
     inputMapping_[input] = inputs_.size();
     inputs_.push_back(input);
   }
@@ -140,13 +145,18 @@ SortedAggregations::SortingSpec SortedAggregations::toSortingSpec(
   return sortingSpec;
 }
 
+// spillExtractFunction的调用, 参考SpillerBase::extractSpill
 Accumulator SortedAggregations::accumulator() const {
   return {
       false,
       sizeof(RowPointers),
+      // false表示没有用到外部memory, 可以仅仅使用row container内部管理的memory,
+      // 比如这里用到的HashStringAllocator. 这种情况下, 在RowContainer析构时, 
+      // 就没有必要执行agg的destroy函数了.
       false,
       1,
       ARRAY(VARBINARY()),
+      // query可用的内存不足时才会进行spill, 但这里的ArrayVector需要分配额外的内存空间?
       [this](folly::Range<char**> groups, VectorPtr& result) {
         extractForSpill(groups, result);
       },
@@ -370,6 +380,8 @@ void SortedAggregations::extractValues(
   SelectivityVector rows;
   std::vector<char*> groupRows;
   for (const auto& [sortingSpec, aggregates] : aggregates_) {
+    // 这里的inputVectors主要作用是为了方便多个aggregates复用已经分配的vector, 
+    // 但为啥仅仅对具有相同sortingSpec的aggregates之间进行复用?
     std::vector<VectorPtr> inputVectors;
     size_t numInputColumns = 0;
     for (const auto& aggregate : aggregates) {

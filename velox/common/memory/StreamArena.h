@@ -60,6 +60,11 @@ class StreamArena {
 
   /// Restores 'this' to post-construction state. Used in recycling streams for
   /// serilizers.
+  ///
+  /// StreamArena析构时, 会自动执行allocations_, allocation_以及largeAllocations_
+  /// 的析构函数, 此时这些allocations会将内存归还pool_. 显式执行clear(), 估计主要是为
+  /// 了复用StreamArena对象.
+  ///
   virtual void clear();
 
  private:
