@@ -1512,6 +1512,11 @@ void Task::addRemoteSplit(
       auto remoteSplit =
           std::dynamic_pointer_cast<RemoteConnectorSplit>(split.connectorSplit);
       VELOX_CHECK(remoteSplit, "Wrong type of split");
+      // remoteSplit->taskId对应于presto中的RemoteSplit#location, 转换过程参见
+      // PrestoToVeloxSplit.cpp文件, location的格式如下, 其中bufferId用于指定本
+      // task应该消费消费上游task的哪片数据 (它和destination_字段是一致的).
+      // http://192.168.1.7:8080/v1/task/20221119_022459_00010_cdbxc.1.0.0/results/0
+      // http://192.168.1.7:8080/v1/task/{上游taskId}/results/{bufferId}
       exchangeClientByPlanNode_[planNodeId]->addRemoteTaskId(
           remoteSplit->taskId);
     }

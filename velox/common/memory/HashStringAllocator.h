@@ -460,13 +460,14 @@ class HashStringAllocator : public StreamArena {
     DECLARE_FIELD(FreeList, freeLists);
 
     // Bitmap with a 1 if the corresponding list in 'free_' is not empty.
+    // 通过位图快速定位上面的freeLists中, 具体哪个free list不为空
     DECLARE_FIELD_WITH_INIT_VALUE(FreeNonEmptyBitMap, freeNonEmpty, {});
 
     // Count of elements in 'free_'. This is 0 when all free_[i].next() ==
     // &free_[i].
     DECLARE_FIELD_WITH_INIT_VALUE(uint64_t, numFree, 0);
 
-    // Sum of the size of blocks in 'free_', excluding headers.
+    // Sum of the size of blocks in 'free_' (including headers).
     DECLARE_FIELD_WITH_INIT_VALUE(uint64_t, freeBytes, 0);
 
     // Counter of allocated bytes. The difference of two point in time values

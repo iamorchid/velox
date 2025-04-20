@@ -116,8 +116,11 @@ void SortBuffer::noMoreInput() {
   VELOX_CHECK_NULL(outputSpiller_);
 
   // It may trigger spill, make sure it's triggered before noMoreInput_ is set.
+  // 此时trigger spill时, 还属于input阶段进行spill, 会校验noMoreInput_为false.
   ensureSortFits();
 
+  // 执行到这里时, 可以保证sort这一步不会发生spill, 因为ensureSortFits已经为sort预留了
+  // 足够的内存了. 否则, sortedRows_.resize这一步触发spill的话, 将会导致异常.
   noMoreInput_ = true;
 
   // No data.
@@ -240,8 +243,11 @@ void SortBuffer::ensureInputFits(const VectorPtr& input) {
   const auto minReservationBytes =
       currentMemoryUsage * spillConfig_->minSpillableReservationPct / 100;
   const auto availableReservationBytes = pool_->availableReservation();
+
+  // outOfLineBytes不为0时, 表示RowContainer中存在variable-length数据
   const int64_t estimatedIncrementalBytes =
       data_->sizeIncrement(input->size(), outOfLineBytes ? flatInputBytes : 0);
+
   if (availableReservationBytes > minReservationBytes) {
     // If we have enough free rows for input rows and enough variable length
     // free space for the vector's flat size, no need for spilling.
@@ -402,8 +408,7 @@ void SortBuffer::prepareOutput(vector_size_t batchSize) {
     BaseVector::prepareForReuse(output, batchSize);
     output_ = std::static_pointer_cast<RowVector>(output);
   } else {
-    output_ = std::static_pointer_cast<RowVector>(
-        BaseVector::create(input_, batchSize, pool_));
+    output_ = BaseVector::create<RowVector>(input_, batchSize, pool_);
   }
 
   for (auto& child : output_->children()) {
@@ -445,12 +450,14 @@ void SortBuffer::getOutputWithSpill() {
     SpillMergeStream* stream = spillMerger_->next();
     VELOX_CHECK_NOT_NULL(stream);
 
+    // 一个merge stream对应一个spill文件, 而一个spill文件中会包含多个batch, 每个batch
+    // 会反序列化为一个独立的RowVector. 
     spillSources_[outputSize] = &stream->current();
     spillSourceRows_[outputSize] = stream->currentIndex(&isEndOfBatch);
     ++outputSize;
     if (FOLLY_UNLIKELY(isEndOfBatch)) {
       // The stream is at end of input batch. Need to copy out the rows before
-      // fetching next batch in 'pop'.
+      // fetching next batch in 'pop'. 因为移到下一个batch后, 当前的batch就会析构掉.
       gatherCopy(
           output_.get(),
           outputRow,
@@ -461,6 +468,7 @@ void SortBuffer::getOutputWithSpill() {
       outputRow += outputSize;
       outputSize = 0;
     }
+
     // Advance the stream.
     stream->pop();
   }

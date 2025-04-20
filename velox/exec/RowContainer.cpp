@@ -317,9 +317,10 @@ char* RowContainer::newRow() {
   return initializeRow(row, false /* reuse */);
 }
 
-/// 这里的reuse很难理解, 底层的memory在task结束后会全部自动释放, 如果reuse为false, 
-/// 则意味着当前row占用的memory不急着释放 (即不会被后续的内存申请复用). 如果reuse为
-/// true, 则意味着希望释放占用的内存, 以便后续其他rows申请内存时可以复用.
+//
+// reuse为true, 表示想复用正在使用的row的固定空间(比如TopN时, 替换淘汰的row),
+// 此时需要将对应row占用的资源进行释放. 
+//
 char* RowContainer::initializeRow(char* row, bool reuse) {
   if (reuse) {
     auto rows = folly::Range<char**>(&row, 1);
@@ -440,6 +441,10 @@ void RowContainer::freeVariableWidthFields(folly::Range<char**> rows) {
 
 void RowContainer::freeAggregates(folly::Range<char**> rows) {
   for (auto& accumulator : accumulators_) {
+    // TODO 如果是clear的场景, 应该用这个有if判断的版本
+    // if (accumulator.usesExternalMemory()) {
+    //   accumulator.destroy(rows);
+    // }
     accumulator.destroy(rows);
   }
 }
@@ -549,6 +554,8 @@ void RowContainer::store(
         row,
         offsets_[columnIndex]);
   } else {
+    // 只能对key或者dependent列进行store操作, 聚合列只允许聚合函数自己
+    // 进行初始化以及内部状态维护, 不允许通过store直接进行列设置.
     VELOX_DCHECK(isKey || accumulators_.empty());
     auto rowColumn = rowColumns_[columnIndex];
     VELOX_DYNAMIC_TYPE_DISPATCH_ALL(

@@ -96,10 +96,11 @@ std::unique_ptr<MemoryArbitrator> createArbitrator(
   //  non-reclaimable cache memory which are pinned by query accesses if
   //  enabled.
 
+  // MemoryManagerOptions的初始化见: PrestoServer::initializeVeloxMemory().
+  // arbitratorCapacity默认值: 38G, allocatorCapacity: 默认值40G
   return MemoryArbitrator::create(
       {.kind = options.arbitratorKind,
-       .capacity =
-           std::min(options.arbitratorCapacity, options.allocatorCapacity),
+       .capacity = std::min(options.arbitratorCapacity, options.allocatorCapacity),
        .arbitrationStateCheckCb = options.arbitrationStateCheckCb,
        .extraConfigs = options.extraArbitratorConfigs});
 }

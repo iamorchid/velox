@@ -282,6 +282,10 @@ inline int128_t ByteInputStream::read<int128_t>() {
 /// in hash tables. The stream is seekable and supports overwriting of
 /// previous content, for example, writing a message body and then
 /// seeking back to start to write a length header.
+///
+/// ByteOutputStream不需要特别的析构函数, 因为它需要的内存都是从arena中分配的, 
+/// 它的内存释放依赖于arena本身的析构.
+///
 class ByteOutputStream {
  public:
   /// For output.

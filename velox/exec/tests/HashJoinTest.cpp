@@ -6152,7 +6152,7 @@ TEST_F(HashJoinTest, leftJoinPreserveProbeOrder) {
       makeRowVector(
           {"k1", "v1"},
           {
-              makeConstant<int64_t>(0, 2),
+              makeConstant<int64_t>(0 /* value */, 2 /* size */),
               makeFlatVector<int64_t>({1, 0}),
           }),
   };
@@ -6173,13 +6173,21 @@ TEST_F(HashJoinTest, leftJoinPreserveProbeOrder) {
               {"k2"},
               PlanBuilder(planNodeIdGenerator).values(buildVectors).planNode(),
               "v1 % 2 = v2 % 2",
-              {"v1"},
+              {"v1", "v2"},
               core::JoinType::kLeft)
           .planNode();
   auto result = AssertQueryBuilder(plan)
                     .config(core::QueryConfig::kPreferredOutputBatchRows, "1")
                     .serialExecution(true)
                     .copyResults(pool_.get());
+
+  std::cout << "------------------------" << std::endl;
+  for (auto& outputVector : result->children()) {
+    for (vector_size_t i = 0; i < outputVector->size(); ++i) {
+      std::cout << outputVector->toString(i) << std::endl;
+    }
+  }
+
   ASSERT_EQ(result->size(), 3);
   auto* v1 =
       result->childAt(0)->loadedVector()->asUnchecked<SimpleVector<int64_t>>();

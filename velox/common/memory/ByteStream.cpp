@@ -319,6 +319,8 @@ char* ByteOutputStream::writePosition() {
   return reinterpret_cast<char*>(current_->buffer) + current_->position;
 }
 
+// 由arena_->newRange的实现知道, 它并不保证返回的可用内存大小满足请求的bytes.
+// 因此, 下面extend之后, 新分配的range大小是可能小于请求bytes.
 void ByteOutputStream::extend(int64_t bytes) {
   if (current_ && current_->position != current_->size) {
     LOG(FATAL) << "Extend ByteOutputStream before range full: "
@@ -342,6 +344,7 @@ void ByteOutputStream::extend(int64_t bytes) {
   }
   arena_->newRange(
       newRangeSize(bytes),
+      // 获取current_的前一个ByteRange
       ranges_.size() == 1 ? nullptr : &ranges_[ranges_.size() - 2],
       current_);
   allocatedBytes_ += current_->size;

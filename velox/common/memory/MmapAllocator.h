@@ -216,7 +216,7 @@ class MmapAllocator : public MemoryAllocator {
     // Number of bits in 'mappedPages_' for one bit in 'mappedFreeLookup_'.
     static constexpr int32_t kPagesPerLookupBit =
         xsimd::batch<int64_t>::size * 128;
-    // Number of extra 0 uint64's at te end of allocation bitmaps for SIMD
+    // Number of extra 0 uint64's at the end of allocation bitmaps for SIMD
     // checks.
     static constexpr int32_t kSimdTail = 8;
 
@@ -402,7 +402,7 @@ class MmapAllocator : public MemoryAllocator {
 
   std::vector<std::unique_ptr<SizeClass>> sizeClasses_;
 
-  // Statistics.
+  // Statistics (所有历史操作的累计统计).
   std::atomic<uint64_t> numAllocations_ = 0;
   std::atomic<uint64_t> numAllocatedPages_ = 0;
   std::atomic<uint64_t> numAdvisedPages_ = 0;

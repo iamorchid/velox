@@ -139,10 +139,11 @@ class BaseHashTable {
   static constexpr uint64_t kArrayHashMaxSize = 2L << 20;
 
   /// Specifies the hash mode of a table.
-  // a) 采用kHash模式时, group keys和hash是多对一的关系
-  // b) 采用kArray模式时, group keys和array index一一对应
-  // c) 采用kNormalizedKey模式时, group keys和hash一一对应. 
-  //    hash通过每个key的range组合得到, 值范围比较大, 不适合作为array的index.
+  /// a) 采用kHash模式时, group keys和hash是多对一的关系
+  /// b) 采用kArray模式时, group keys和array index一一对应,
+  ///    array的index通过每个key的valueId组合得到
+  /// c) 采用kNormalizedKey模式时, group keys和hash一一对应. 
+  ///    hash通过每个key的valueId组合得到, 值范围比较大, 不适合作为array的index.
   enum class HashMode { kHash, kArray, kNormalizedKey };
 
   static constexpr int8_t kNoSpillInputStartPartitionBit = -1;

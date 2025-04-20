@@ -511,6 +511,11 @@ void SharedArbitrator::addPool(const std::shared_ptr<MemoryPool>& pool) {
   std::vector<ContinuePromise> arbitrationWaiters;
   {
     std::lock_guard<std::mutex> l(stateMutex_);
+    // scopedParticipant的minCapacity和initCapacity都是从participantConfig_而来,
+    // PrestoServer::initializeVeloxMemor初始化的默认值分别为: 64M和128M. 而maxCapacity
+    // 对应的是query能使用的最大内存(配置kQueryMaxMemoryPerNode, 默认4GB). 其中,
+    // 预留freeReservedCapacity_的目的, 就是为了尽可能保证每个query都能分配到minCapacity
+    // 的内存空间(参见kReservedCapacity说明).
     const uint64_t minBytesToReserve = std::min(
         scopedParticipant->maxCapacity(), scopedParticipant->minCapacity());
     const uint64_t maxBytesToReserve = std::max(
@@ -783,6 +788,7 @@ uint64_t SharedArbitrator::allocateCapacityLocked(
     maxAllocateBytes = std::max(requestBytes, minAllocateBytes);
   }
 
+  // getGrowTargets保证了: requestBytes <= maxGrowBytes
   const uint64_t nonReservedBytes =
       std::min<uint64_t>(freeNonReservedCapacity_, maxAllocateBytes);
   if (nonReservedBytes >= maxAllocateBytes) {
@@ -790,12 +796,16 @@ uint64_t SharedArbitrator::allocateCapacityLocked(
     return nonReservedBytes;
   }
 
+  // 尝试按照minAllocateBytes的大小来分配capacity, freeReservedCapacity_是为了
+  // 保证每个query都尽可能分配到config_->minCapacity的空间 (见getGrowTargets).
   uint64_t reservedBytes{0};
   if (nonReservedBytes < minAllocateBytes) {
     const uint64_t freeReservedCapacity = freeReservedCapacity_;
     reservedBytes =
         std::min(minAllocateBytes - nonReservedBytes, freeReservedCapacity);
   }
+
+  // 走到这里说明: freeReservedCapacity_非常低 或者 minAllocateBytes < requestBytes
   if (FOLLY_UNLIKELY(nonReservedBytes + reservedBytes < requestBytes)) {
     return 0;
   }
@@ -1189,7 +1199,8 @@ std::optional<ScopedArbitrationParticipant> SharedArbitrator::getParticipant(
 }
 
 // 如果增加requestBytes后, memory pool使用的capacity不会超过单个query的maxCapaicity
-// 的限制 且 不会超过node级别的capacity_的限制, 则返回true.
+// 的限制 且 不会超过node级别的arbitrator capacity_的限制, 则返回true. 默认情况下, 
+// arbitrator capacity_会远远大于query的maxCapaicity.
 bool SharedArbitrator::checkCapacityGrowth(ArbitrationOperation& op) const {
   if (!op.participant()->checkCapacityGrowth(op.requestBytes())) {
     return false;
@@ -1212,7 +1223,7 @@ bool SharedArbitrator::ensureCapacity(ArbitrationOperation& op) {
   RETURN_TRUE_IF_TRUE(checkCapacityGrowth(op));
 
   // reclaim memory pool中被reserved的内存空间 (其中部分空间可能已经分配内存), 
-  // memory pool的即capacity_不会变化, reservationBytes_可能会减小.
+  // memory pool的capacity_不会变化, reservationBytes_可能会减小.
   reclaim(
       op.participant(),
       op.requestBytes(),

@@ -252,6 +252,7 @@ bool MallocAllocator::growContiguousWithoutRetry(
   numAllocated_ += increment;
   numMapped_ += increment;
   numExternalMapped_ += increment;
+  // 接口MemoryAllocator::growContiguous会保证allocation的新size没有超过maxSize.
   allocation.set(
       allocation.data(),
       allocation.size() + AllocationTraits::kPageSize * increment,
