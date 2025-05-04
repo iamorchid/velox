@@ -204,10 +204,10 @@ class raw_vector {
     // Clear the word below the pointer so that we do not get read of
     // uninitialized when reading a partial word that extends below
     // the pointer.
+    T* data = getDataFromBuffer(buffer);
     *reinterpret_cast<int64_t*>(
-        reinterpret_cast<uint8_t*>(getDataFromBuffer(buffer)) -
-        sizeof(int64_t)) = 0;
-    return getDataFromBuffer(buffer);
+        reinterpret_cast<uint8_t*>(data) - sizeof(int64_t)) = 0;
+    return data;
   }
 
   void free() {

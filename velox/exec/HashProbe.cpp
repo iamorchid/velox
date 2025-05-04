@@ -392,6 +392,7 @@ void HashProbe::asyncWaitForHashTable() {
   }
 
   if (hashBuildResult->hasNullKeys) {
+    // HashBuild仅在nullAware_为true时, 才会设置joinHasNullKeys_为true
     VELOX_CHECK(nullAware_);
     if (isAntiJoin(joinType_) && !joinNode_->filter()) {
       // Null-aware anti join with null keys on the build side without a filter
@@ -598,7 +599,7 @@ BlockingReason HashProbe::isBlocked(ContinueFuture* future) {
     case ProbeOperatorState::kWaitForBuild:
       VELOX_CHECK_NULL(table_);
       if (!future_.valid()) {
-        // 这里虽然暂时设置stage为kWaitForBuild, 但如果build table尚未ready,
+        // 这里虽然暂时设置stage为kRunning, 但如果build table尚未ready,
         // asyncWaitForHashTable还是会将state设置为kWaitForBuild
         setRunning();
         asyncWaitForHashTable();
