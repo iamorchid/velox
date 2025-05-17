@@ -23,6 +23,8 @@ namespace facebook::velox::exec {
 // partitioning data.
 class HashBitRange {
  public:
+ // begin和end相等时, fieldMask_的值为0, 即partition(hash)总是0, 
+ // 符合numPartitions()为一个要求.
   HashBitRange(uint8_t begin, uint8_t end)
       : begin_(begin), end_(end), fieldMask_(bits::lowMask(end - begin)) {
     VELOX_CHECK_LE(begin_, end_);

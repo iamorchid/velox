@@ -56,6 +56,9 @@ bool shouldEagerlyMaterialize(
 
 } // namespace
 
+// 理解这里outputType和readerOutputType_的差异, 其中
+// outputType: 对应TableScan算子输出的schema (算子输出column名称/类型可以和底层source的column不一样)
+// readerOutputType_: 和output_对应的、底层数据的schema
 HiveDataSource::HiveDataSource(
     const RowTypePtr& outputType,
     const std::shared_ptr<connector::ConnectorTableHandle>& tableHandle,
@@ -392,6 +395,7 @@ std::optional<RowVectorPtr> HiveDataSource::next(
   const auto rowsScanned = splitReader_->next(size, output_);
   completedRows_ += rowsScanned;
   if (rowsScanned == 0) {
+    // 当前split已经处理完成
     splitReader_->updateRuntimeStats(runtimeStats_);
     resetSplit();
     return nullptr;

@@ -100,6 +100,10 @@ class RowReader {
    */
   virtual std::optional<size_t> estimatedRowSize() const = 0;
 
+  //
+  // TableScan算子会调用DataSource#allPrefetchIssued(), 然后DataSource进一步调用内部
+  // 维护的RowReader#allPrefetchIssued(), 参考: TableScan::checkPreload().
+  //
   // Returns true if the expected IO for 'this' is scheduled. If this
   // is true it makes sense to prefetch the next split.
   virtual bool allPrefetchIssued() const {
