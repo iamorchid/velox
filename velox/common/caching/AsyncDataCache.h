@@ -160,9 +160,9 @@ class AsyncDataCacheEntry {
   explicit AsyncDataCacheEntry(CacheShard* shard);
   ~AsyncDataCacheEntry();
 
-  /// Sets the key and allocates the entry's memory.  Resets
-  ///  all other state. The entry must be held exclusively and must
-  ///  hold no memory when calling this.
+  /// Sets the key and allocates the entry's memory. Resets all other 
+  /// state. The entry must be held exclusively and must hold no memory 
+  /// when calling this.
   void initialize(FileCacheKey key);
 
   memory::Allocation& data() {

@@ -479,6 +479,11 @@ void CachedBufferedInput::readRegion(
         options_.maxCoalesceDistance());
   }
   allCoalescedLoads_.push_back(load);
+
+  // 这里并没有真正去读取数据, 而是将多个读取操作映射到同一个io load上,
+  // 即一次coalesced io load可以一把读取将多个邻近的数据. 当其中一个
+  // request需要读取数据时(CacheInputStream::Next), 会真正执行load
+  // 操作, 它顺便将其他request需要的数据也读取上来.
   coalescedLoads_.withWLock([&](auto& loads) {
     for (auto& request : requests) {
       loads[request->stream] = load;
