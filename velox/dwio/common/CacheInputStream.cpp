@@ -370,7 +370,10 @@ void CacheInputStream::loadPosition() {
       ioStats_->queryThreadIoLatency().increment(loadUs);
     }
 
+    // 这里的逻辑和CachedBufferedInput.cpp中的makeRequestParts需要保持一致,
+    // 否则会导致无法命中AsyncDataCache的缓存.
     const auto nextLoadRegion = nextQuantizedLoadRegion(position_);
+
     // There is no need to update the metric in the loadData method because
     // loadSync is always executed regardless and updates the metric.
     loadSync(nextLoadRegion);
@@ -388,6 +391,9 @@ void CacheInputStream::loadPosition() {
       offsetInRun_ = offsetInEntry;
       offsetOfRun_ = 0;
     } else {
+      // runIndex_   : cache entry中第N个PageRun
+      // offsetInRun_: 对应PageRun中数据的起始位置
+      // offsetOfRun_: PageRun在整个CacheEntry中的起始位置
       entry->data().findRun(offsetInEntry, &runIndex_, &offsetInRun_);
       offsetOfRun_ = offsetInEntry - offsetInRun_;
       const auto run = entry->data().runAt(runIndex_);

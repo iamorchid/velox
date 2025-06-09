@@ -305,6 +305,11 @@ class AsyncDataCacheEntry {
 
   AccessStats accessStats_;
 
+  //
+  // prefetch pages也包含了有效的数据, 但是它们的数据还没有被访问过。但第一次访问的时候,
+  // isPrefetch_会被设置为false. 但内存紧张时, prefetch pages不应该占用cache pages
+  // 太多比例.
+  //
   // True if 'this' is speculatively loaded. This is reset on first hit. Allows
   // catching a situation where prefetched entries get evicted before they are
   // hit.
