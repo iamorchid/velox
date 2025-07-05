@@ -513,6 +513,7 @@ void DwrfRowReader::checkSkipStrides(uint64_t strideSize) {
   }
 }
 
+// 内部方法, 接口next(...)调用
 void DwrfRowReader::readNext(
     uint64_t rowsToRead,
     const dwio::common::Mutation* mutation,
@@ -528,6 +529,7 @@ void DwrfRowReader::readNext(
     // the wrapper reader.
     VELOX_CHECK_NULL(
         mutation, "Mutation pushdown is only supported in selective reader");
+    // 参见: StructColumnReader::next
     getColumnReader()->next(rowsToRead, result);
     if (startTime.has_value()) {
       decodingTimeCallback_(
@@ -558,6 +560,8 @@ int64_t DwrfRowReader::nextRowNumber() {
     return *nextRowNumber_;
   }
 
+  // strideSize参数用于指定每隔多少行生成一个Row Group (会生成独立的Row Index Entry),
+  // 一个orc stripe可以包含多个groups.
   const auto strideSize = getReader().footer().rowIndexStride();
   while (currentStripe_ < stripeCeiling_) {
     if (currentRowInStripe_ == 0) {
@@ -577,6 +581,7 @@ int64_t DwrfRowReader::nextRowNumber() {
     }
 
     checkSkipStrides(strideSize);
+
     if (currentRowInStripe_ < rowsInCurrentStripe_) {
       nextRowNumber_ = firstRowOfStripe_[currentStripe_] + currentRowInStripe_;
       return *nextRowNumber_;
@@ -806,6 +811,16 @@ DwrfReader::DwrfReader(
   // code. So we rename column names in the file schema to match table schema.
   // We test the options to have 'fileSchema' (actually table schema) as most
   // of the unit tests fail to provide it.
+  //
+  // 在 Apache Hive 中，hive.orc.use-column-names 是一个关键的配置参数，用于控制 Hive 
+  // 在读取 ORC 文件 时是否根据 列名（column names） 进行匹配，而非依赖列的顺序.
+  // 默认值：false（Hive 3.x 之前默认值；Hive 4.x 及以上默认值为 true）。
+  // 当设置为 true:  Hive 会根据 列名 匹配 ORC 文件中的列与 Hive 表定义的列。
+  // 当设置为 false: Hive 会根据 列顺序 匹配 ORC 文件中的列与 Hive 表定义的列。
+  //
+  // 优化 configureReaderOptions 函数定义知道, ReaderOptions中的fileSchema_其实对应
+  // 的是hive表的schema, readerBase_->schema()对应才真是是orc文件的schema.
+  //
   if ((!readerBase_->readerOptions().useColumnNamesForColumnMapping()) &&
       (readerBase_->readerOptions().fileSchema() != nullptr)) {
     updateColumnNamesFromTableSchema();

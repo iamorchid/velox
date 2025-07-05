@@ -160,9 +160,9 @@ class AsyncDataCacheEntry {
   explicit AsyncDataCacheEntry(CacheShard* shard);
   ~AsyncDataCacheEntry();
 
-  /// Sets the key and allocates the entry's memory.  Resets
-  ///  all other state. The entry must be held exclusively and must
-  ///  hold no memory when calling this.
+  /// Sets the key and allocates the entry's memory. Resets all other 
+  /// state. The entry must be held exclusively and must hold no memory 
+  /// when calling this.
   void initialize(FileCacheKey key);
 
   memory::Allocation& data() {
@@ -305,6 +305,11 @@ class AsyncDataCacheEntry {
 
   AccessStats accessStats_;
 
+  //
+  // prefetch pages也包含了有效的数据, 但是它们的数据还没有被访问过。但第一次访问的时候,
+  // isPrefetch_会被设置为false. 但内存紧张时, prefetch pages不应该占用cache pages
+  // 太多比例.
+  //
   // True if 'this' is speculatively loaded. This is reset on first hit. Allows
   // catching a situation where prefetched entries get evicted before they are
   // hit.
@@ -751,7 +756,7 @@ class AsyncDataCache : public memory::Cache {
   /// Calls 'allocate' until this returns true. Returns true if
   /// allocate returns true. and Tries to evict at least 'numPages' of
   /// cache after each failed call to 'allocate'.  May pause to wait
-  /// for SSD cache flush if ''ssdCache_' is set and is busy
+  /// for SSD cache flush if 'ssdCache_' is set and is busy
   /// writing. Does random back-off after several failures and
   /// eventually gives up. Allocation must not be serialized by a mutex
   /// for memory arbitration to work.

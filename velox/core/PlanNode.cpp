@@ -1848,6 +1848,10 @@ WindowNode::WindowNode(
   }
 
   for (const auto& windowFunction : windowFunctions_) {
+    // In RANGE mode, frame starts and ends of expression PRECEDING or expression
+    // FOLLOWING define the start or end of the frame as the value difference of 
+    // the sort key from the current row. 
+    // RANGE mode下, 要计算value difference, 显然只应该支持单个sorting key.
     if (windowFunction.frame.type == WindowType::kRange) {
       if (windowFunction.frame.startValue || windowFunction.frame.endValue) {
         // This is RANGE frame with a k limit bound like

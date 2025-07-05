@@ -70,17 +70,17 @@ class TreeOfLosers {
     VELOX_CHECK_LT(streams_.size(), std::numeric_limits<TIndex>::max());
     VELOX_CHECK_GE(streams_.size(), 1);
 
-    int32_t size = 0;
-    int32_t levelSize = 1;
+    int32_t levelOrdinal = 0; // 当前level第一个node序号
+    int32_t levelSize = 1; // 当前level的node数量
     int32_t numStreams = streams_.size();
     while (numStreams > levelSize) {
-      size += levelSize;
+      levelOrdinal += levelSize;
       levelSize *= 2;
     }
 
     if (numStreams == bits::nextPowerOfTwo(numStreams)) {
       // All leaves are on last level.
-      firstStream_ = size;
+      firstStream_ = levelOrdinal;
     } else {
       // Some of the streams are on the last level and some on the level before.
       // The first stream follows the last inner node in the node numbering.

@@ -93,6 +93,9 @@ void BufferedInput::readToBuffer(
   }
 }
 
+// enqueue本身并不会触发底层数据的读取, 进行enqueue操作之后, 需要进行load操作, 
+// 才能触发prefetch操作. 否则, 直接使用SeekableInputStream进行数据读取时, 则
+// 要读取的数据大概率没有prefetch.
 std::unique_ptr<SeekableInputStream> BufferedInput::enqueue(
     Region region,
     const dwio::common::StreamIdentifier* /*sid*/) {
@@ -164,9 +167,9 @@ void BufferedInput::mergeRegions() {
   auto& e = enqueuedToBufferOffset_;
   // We want to map here where each region ended in the final merged regions
   // vector.
-  // For example, if this is the regions vector: {{6, 3}, {24, 3}, {3, 3}, {0,
-  // 3}, {29, 3}} After sorting, "e" would look like this: [3,2,0,1,4]. Because
-  // region in position number 3 ended up in position 0 and so on.
+  // For example, if this is the regions vector: {{6, 3}, {24, 3}, {3, 3}, 
+  // {0, 3}, {29, 3}} After sorting, "e" would look like this: [3,2,1,0,4]. 
+  // Because region in position number 3 ended up in position 0 and so on.
   // For a maxMergeDistance of 1, "te" will look like: [0,1,0,0,2], because
   // original regions 3, 2 and 0 were merged into a larger region, now in
   // position 0. The original region 1, became region 1, and original region 4

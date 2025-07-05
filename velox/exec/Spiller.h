@@ -270,7 +270,7 @@ class SortInputSpiller : public SpillerBase {
       : SpillerBase(
             container,
             std::move(rowType),
-            HashBitRange{},
+            HashBitRange{}, // 对应一个partition
             sortingKeys,
             std::numeric_limits<uint64_t>::max(),
             spillConfig->maxSpillRunRows,
@@ -305,6 +305,8 @@ class SortOutputSpiller : public SpillerBase {
  private:
   void runSpill(bool lastRun) override;
 
+  // output spiller不需要再排序了, 因为在spill之前, 已经在
+  // 内存中所有的rows进行过排序.
   bool needSort() const override {
     return false;
   }

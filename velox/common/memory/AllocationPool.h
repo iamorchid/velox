@@ -62,9 +62,15 @@ class AllocationPool {
     return usedBytes_;
   }
 
+  ///
   /// Returns the number of bytes allocatable without growing 'this'.
+  ///
   /// 这里freeBytes不能直接使用freeAddressableBytes进行替代, 因为对于ContiguousAllocation,
   /// freeAddressableBytes包含了MemoryPool尚未reverse过的虚拟空间大小.
+  ///
+  /// 另外, newRunImpl保证了只要largeAllocations_不为空, 后续分配新的内存时, 只会创建
+  /// 新的ContiguousAllocation, 而不会创建Allocation.
+  ///
   int64_t freeBytes() const {
     if (largeAllocations_.empty()) {
       return freeAddressableBytes();

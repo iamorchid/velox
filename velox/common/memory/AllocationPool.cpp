@@ -140,7 +140,7 @@ void AllocationPool::newRunImpl(MachinePageCount numPages) {
     // maxSize对应的是虚拟内存的实际大小.
     largeAllocations_.emplace_back(std::move(largeAlloc));
 
-    // 此时, memory pool仅仅为numPages的内存进行过reserve操作
+    // 此时, memory pool仅仅为pagesToAlloc对应的内存进行过reserve操作
     usedBytes_ += AllocationTraits::pageBytes(pagesToAlloc);
     return;
   }

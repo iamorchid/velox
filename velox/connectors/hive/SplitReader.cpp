@@ -326,6 +326,8 @@ void SplitReader::createReader() {
 
 RowTypePtr SplitReader::getAdaptedRowType() const {
   auto& fileType = baseReader_->rowType();
+  // baseReaderOpts_.fileSchema()来自hiveTableHandle->dataColumns(), 即对应table schema.
+  // 而fileType则是基于orc footer中的type信息构建出来的.
   auto columnTypes = adaptColumns(fileType, baseReaderOpts_.fileSchema());
   auto columnNames = fileType->names();
   return ROW(std::move(columnNames), std::move(columnTypes));

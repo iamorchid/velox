@@ -215,6 +215,9 @@ void CacheInputStream::loadSync(const Region& region) {
     folly::SemiFuture<bool> cacheLoadWait(false);
     cache::RawFileCacheKey key{fileNum_, region.offset};
     clearCachePin();
+    
+    // 如果对应的cache entry处于kExclusive状态(即有其他线程在进行CoalescedLoad操作),
+    // 则返回的CachePin为empty, 此时需要等待CoalescedLoad操作完成.
     pin_ = cache_->findOrCreate(key, region.length, &cacheLoadWait);
     if (pin_.empty()) {
       VELOX_CHECK(cacheLoadWait.valid());
@@ -234,6 +237,9 @@ void CacheInputStream::loadSync(const Region& region) {
       // Hit memory cache.
       ioStats_->ramHit().increment(hitSize);
     }
+
+    // exclusive表示数据cache中尚未填充数据, 仅仅是分配好了对应缓存
+    // 空间 (当前线程有义务填充数据, 其他线程则等待数据ready).
     if (!entry->isExclusive()) {
       return;
     }
@@ -335,6 +341,16 @@ std::string CacheInputStream::ssdFileName() const {
 void CacheInputStream::loadPosition() {
   const auto offset = region_.offset;
   if (pin_.empty()) {
+    //
+    // 由CachedBufferedInput::readRegion可以知道, 一个CoalescedLoad可以一次性读取
+    // 多个CacheInputStream所需要的数据. 如果load存在, 则说明当前CacheInputStream
+    // 是第一个进行loadPosition的, 由它负责CoalescedLoad的数据加载(对于其他线程, 下面
+    // 的函数调用会返回null, 即仅首次调用才返回pending的CoalescedLoad).
+    //
+    // 当CoalescedLoad处于加载过程中, 它所涵盖的CacheInputStream对应的cache entry都
+    // 处于kExclusive状态. 其他线程执行loadSync操作时, 将会阻塞, 直到CoalescedLoad
+    // 完成加载.
+    //
     auto load = bufferedInput_->coalescedLoad(this);
     if (load != nullptr) {
       folly::SemiFuture<bool> waitFuture(false);
@@ -354,7 +370,10 @@ void CacheInputStream::loadPosition() {
       ioStats_->queryThreadIoLatency().increment(loadUs);
     }
 
+    // 这里的逻辑和CachedBufferedInput.cpp中的makeRequestParts需要保持一致,
+    // 否则会导致无法命中AsyncDataCache的缓存.
     const auto nextLoadRegion = nextQuantizedLoadRegion(position_);
+
     // There is no need to update the metric in the loadData method because
     // loadSync is always executed regardless and updates the metric.
     loadSync(nextLoadRegion);
@@ -372,6 +391,9 @@ void CacheInputStream::loadPosition() {
       offsetInRun_ = offsetInEntry;
       offsetOfRun_ = 0;
     } else {
+      // runIndex_   : cache entry中第N个PageRun
+      // offsetInRun_: 对应PageRun中数据的起始位置
+      // offsetOfRun_: PageRun在整个CacheEntry中的起始位置
       entry->data().findRun(offsetInEntry, &runIndex_, &offsetInRun_);
       offsetOfRun_ = offsetInEntry - offsetInRun_;
       const auto run = entry->data().runAt(runIndex_);

@@ -148,6 +148,7 @@ ReaderBase::ReaderBase(
   }
 
   const uint64_t footerSize = postScript_->footerLength();
+  // 只有FileFormat::DWRF格式才会定义cacheSize
   const uint64_t cacheSize =
       postScript_->hasCacheSize() ? postScript_->cacheSize() : 0;
   const uint64_t tailSize = 1 + psLength_ + footerSize + cacheSize;
@@ -326,6 +327,7 @@ std::unique_ptr<ColumnStatistics> ReaderBase::columnStatistics(
       ColumnStatisticsWrapper(&stats->statistics(index - root)), statsContext);
 }
 
+// 基于orc或者dwrf的文件, 来解析完整的类型信息
 std::shared_ptr<const Type> ReaderBase::convertType(
     const FooterWrapper& footer,
     uint32_t index,

@@ -481,6 +481,8 @@ void SelectiveStructColumnReaderBase::getValues(
   }
 
   setComplexNulls(rows, *result);
+
+  // 对于scanSpec_中没有覆盖到的字段, resultRow中的column vector将为nullptr
   for (const auto& childSpec : scanSpec_->children()) {
     VELOX_TRACE_HISTORY_PUSH("getValues %s", childSpec->fieldName().c_str());
     if (!childSpec->keepValues()) {

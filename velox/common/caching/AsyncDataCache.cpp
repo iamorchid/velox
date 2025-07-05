@@ -191,6 +191,9 @@ CachePin CacheShard::findOrCreate(
           ++numHit_;
           hitBytes_ += foundEntry->size();
         }
+
+        // 这里的设计有些诡异, foundEntry->numPins_在构建CachePin
+        // 之外增加, 却在CachePin析构时进行递减.
         ++foundEntry->numPins_;
         CachePin pin;
         pin.setEntry(foundEntry);
@@ -414,6 +417,8 @@ uint64_t CacheShard::evict(
         eventCounter_ = 0;
       }
 
+      // 当candidate->key_.fileNum.hasValue()为true时, 意味着entryMap_还保留了
+      // RawFileCacheKey到AsyncDataCacheEntry映射, 即还可以通过cache key找到.
       int32_t score = 0;
       if (candidate->numPins_ == 0 &&
           (!candidate->key_.fileNum.hasValue() || evictAllUnpinned ||

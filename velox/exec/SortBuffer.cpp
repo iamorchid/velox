@@ -120,7 +120,7 @@ void SortBuffer::noMoreInput() {
   ensureSortFits();
 
   // 执行到这里时, 可以保证sort这一步不会发生spill, 因为ensureSortFits已经为sort预留了
-  // 足够的内存了. 否则, sortedRows_.resize这一步触发spill的话, 将会导致异常.
+  // 足够的内存了. 否则, sortedRows_.resize(...)这一步触发spill的话, 将会导致异常.
   noMoreInput_ = true;
 
   // No data.
@@ -195,15 +195,12 @@ void SortBuffer::spill() {
   updateEstimatedOutputRowSize();
 
   //
-  // sortedRows_不为空时, 则一定执行到了noMoreInput且之前没有发生过spill (即所有的数
+  // sortedRows_不为空时, 则一定执行完了noMoreInput且之前没有发生过spill (即所有的数
   // 据都定义在内存中, sortedRows_用于内存中的数据排序), 此时对应的一定是output阶段. 
-  // 也就是说, 之前addInput没有发生spill, 但是在排序时发生了spill.
+  // 也就是说, 之前addInput没有发生spill, 但在返回排序后的结果时, 发生了spill (排序本身
+  // 不可能发生spill, 因为排序之前reserve了足够的内存).
   //
-  // sortedRows_为空时, 执行到这里只可能对应input阶段而不可能对应output. 假设对应到
-  // output阶段, sortedRows_为空意味着addInput阶段发生过spill (否则noMoreInput中
-  // 必然会初始化sortedRows_), 则意味着noMoreInput将会执行spill操作, 进而执行
-  // spillInput(它会执行data_->clear()). 那么, 在output阶段时, spill()的执行在上
-  // 面的if语句中就提前返回了, 不可能执行到这里。
+  // 相反, sortedRows_为空时, 执行到这里只可能对应input阶段.
   //
   if (sortedRows_.empty()) {
     spillInput();
@@ -450,14 +447,15 @@ void SortBuffer::getOutputWithSpill() {
     SpillMergeStream* stream = spillMerger_->next();
     VELOX_CHECK_NOT_NULL(stream);
 
-    // 一个merge stream对应一个spill文件, 而一个spill文件中会包含多个batch, 每个batch
-    // 会反序列化为一个独立的RowVector. 
+    // 一个merge stream对应一个排过序的spill文件, 而一个spill文件中可以包含多个batch, 
+    // 每个batch会反序列化为一个独立的RowVector. 
     spillSources_[outputSize] = &stream->current();
     spillSourceRows_[outputSize] = stream->currentIndex(&isEndOfBatch);
     ++outputSize;
     if (FOLLY_UNLIKELY(isEndOfBatch)) {
       // The stream is at end of input batch. Need to copy out the rows before
-      // fetching next batch in 'pop'. 因为移到下一个batch后, 当前的batch就会析构掉.
+      // fetching next batch in 'pop'. 
+      // 因为移到下一个batch后, 当前的batch就会析构掉.
       gatherCopy(
           output_.get(),
           outputRow,

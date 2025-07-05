@@ -419,6 +419,7 @@ void HashProbe::asyncWaitForHashTable() {
   }
 
   if (hashBuildResult->hasNullKeys) {
+    // HashBuild仅在nullAware_为true时, 才会设置joinHasNullKeys_为true
     VELOX_CHECK(nullAware_);
     if (isAntiJoin(joinType_) && !joinNode_->filter()) {
       // Null-aware anti join with null keys on the build side without a filter
@@ -622,7 +623,7 @@ BlockingReason HashProbe::isBlocked(ContinueFuture* future) {
     case ProbeOperatorState::kWaitForBuild:
       VELOX_CHECK_NULL(table_);
       if (!future_.valid()) {
-        // 这里虽然暂时设置stage为kWaitForBuild, 但如果build table尚未ready,
+        // 这里虽然暂时设置stage为kRunning, 但如果build table尚未ready,
         // asyncWaitForHashTable还是会将state设置为kWaitForBuild
         setRunning();
         asyncWaitForHashTable();
@@ -743,7 +744,7 @@ void HashProbe::addInput(RowVectorPtr input) {
 
   // 如果table_采用的不是kHash模式, 则在prepareForJoinProbe阶段就可以知道,
   // input_的哪些rows关联的存在build rows (否则, lookup_->rows对应的是所
-  // 有的activeRows_).
+  // 有的activeRows_, 且lookup.hashes会计算好相应的hash值).
   table_->prepareForJoinProbe(*lookup_.get(), input_, activeRows_, false);
 
   if (joinIncludesMissesFromLeft(joinType_)) {
@@ -768,6 +769,7 @@ void HashProbe::addInput(RowVectorPtr input) {
       input_ = nullptr;
       return;
     }
+    // 将probe table中的行同build table进行关联
     lookup_->hits.resize(lookup_->rows.back() + 1);
     table_->joinProbe(*lookup_);
   }
@@ -1123,6 +1125,11 @@ RowVectorPtr HashProbe::getOutputInternal(bool toSpillOutput) {
     // If we need non-matching probe side row, there is a possibility that such
     // row exists at end of an input batch and being carried over in the next
     // output batch, so we need to make extra room of one row in output.
+    //
+    // 虽然LeftSemiFilterJoin需要的是和build table rows匹配的probe rows, 但也依赖这个逻辑. 
+    // 因为上一批的最后一个probe row可能还没有输出 (只有遇到下一个是不同的probe row时, 才会输出). 
+    // 因此只要可能会导致上一批最后一个probe row输出的情况, 都应该执行这个操作.
+    // 
     ++outputTableRowsCapacity_;
   }
 
@@ -1155,6 +1162,8 @@ RowVectorPtr HashProbe::getOutputInternal(bool toSpillOutput) {
         // When build side is not empty, anti join without a filter returns
         // probe rows with no nulls in the join key and no match in the build
         // side.
+        // 执行到这里时, 可以保证build table中不会存在null keys, asyncWaitForHashTable
+        // 在build table就绪时, 已经保证了这一点.
         for (auto i = 0; i < inputSize; ++i) {
           if (nonNullInputRows_.isValid(i) &&
               (!activeRows_.isValid(i) || !lookup_->hits[i])) {
@@ -1566,6 +1575,10 @@ int32_t HashProbe::evalFilter(int32_t numRows) {
       for (auto i = 0; i < numRows; ++i) {
         const bool passed = filterPassed(i);
         noMatchDetector_.advance(rawOutputProbeRowMapping[i], passed, addMiss);
+
+        // AntiJoin的场景之所以不需要tempOutputTableRows和tempOutputRowMapping, 是因为它
+        // 不需要处理passed场景 (即advance更新outputTableRows[i]后也没有关系). 但对于这里的
+        // 情况, 不允许advance直接更新outputTableRows[i], 因为下面还会用到.
         if (passed) {
           tempOutputTableRows[numPassed] = outputTableRows[i];
           tempOutputRowMapping[numPassed++] = rawOutputProbeRowMapping[i];

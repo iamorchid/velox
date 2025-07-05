@@ -121,10 +121,12 @@ class AsyncSource {
         return nullptr;
       }
       if (making_) {
+        // 其他caller正在执行prepare操作
         promise_ = std::make_unique<ContinuePromise>();
         wait = promise_->getSemiFuture();
       } else {
         if (!make_) {
+          // 其他caller已经在move操作中, 执行了runMake
           return nullptr;
         }
         std::swap(make, make_);

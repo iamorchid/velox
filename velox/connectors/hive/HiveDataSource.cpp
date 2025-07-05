@@ -56,6 +56,9 @@ bool shouldEagerlyMaterialize(
 
 } // namespace
 
+// 理解这里outputType和readerOutputType_的差异, 其中
+// outputType: 对应TableScan算子输出的schema (算子输出column名称/类型可以和底层source的column不一样)
+// readerOutputType_: 和output_对应的、底层数据的schema
 HiveDataSource::HiveDataSource(
     const RowTypePtr& outputType,
     const connector::ConnectorTableHandlePtr& tableHandle,
@@ -108,6 +111,9 @@ HiveDataSource::HiveDataSource(
 
     auto* handle = static_cast<const HiveColumnHandle*>(it->second.get());
     readColumnNames.push_back(handle->name());
+
+    // 对于array/map/struct, coordinator可以通过子字段下推的方式告诉底层
+    // connector, 只需要加载特定的子字段数据.
     for (auto& subfield : handle->requiredSubfields()) {
       VELOX_USER_CHECK_EQ(
           getColumnName(subfield),
@@ -354,6 +360,7 @@ std::optional<RowVectorPtr> HiveDataSource::next(
   const auto rowsScanned = splitReader_->next(size, output_);
   completedRows_ += rowsScanned;
   if (rowsScanned == 0) {
+    // 当前split已经处理完成
     splitReader_->updateRuntimeStats(runtimeStats_);
     resetSplit();
     return nullptr;

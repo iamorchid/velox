@@ -243,7 +243,7 @@ uint64_t SpillWriter::write(
       serializer::presto::PrestoVectorSerde::PrestoOptions options = {
           kDefaultUseLosslessTimestamp,
           compressionKind_,
-          0.8,
+          /*compressionRatio=*/0.8,
           /*nullsFirst=*/true};
       batch_ = std::make_unique<VectorStreamGroup>(pool_, serde_);
       batch_->createStreamTree(

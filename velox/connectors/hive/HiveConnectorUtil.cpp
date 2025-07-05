@@ -348,6 +348,8 @@ void processFieldSpec(
 } // namespace
 
 std::shared_ptr<common::ScanSpec> makeScanSpec(
+    // 和TableScan输出对应的底层table的RowType, 它们字段名称可以不一样, 但类型保持一致.
+    // 底层table的RowType的字段为底层存储的column名称
     const RowTypePtr& rowType,
     const folly::F14FastMap<std::string, std::vector<const common::Subfield*>>&
         outputSubfields,

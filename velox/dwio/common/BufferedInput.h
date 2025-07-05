@@ -72,7 +72,7 @@ class BufferedInput {
 
   /// The previous API was taking a vector of regions. Now we allow callers to
   /// enqueue region any time/place and we do final load into buffer in 2 steps
-  /// (enqueue....load). 'si' allows tracking which streams actually get read.
+  /// (enqueue....load). 'sid' allows tracking which streams actually get read.
   /// This may control read-ahead and caching for BufferedInput implementations
   /// supporting these.
   virtual std::unique_ptr<SeekableInputStream> enqueue(

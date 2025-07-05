@@ -82,7 +82,6 @@ bool CachedBufferedInput::shouldPreload(int32_t numPages) {
     numPages += memory::AllocationTraits::numPages(
         std::min<int32_t>(request.size, options_.loadQuantum()));
   }
-  const auto cachePages = cache_->incrementCachedPages(0);
   auto* allocator = cache_->allocator();
   const auto maxPages =
       memory::AllocationTraits::numPages(allocator->capacity());
@@ -91,6 +90,13 @@ bool CachedBufferedInput::shouldPreload(int32_t numPages) {
     // There is free space for the read-ahead.
     return true;
   }
+
+  //
+  // prefetched pages也包含了有效的数据, 但是这些数据还没有被访问过。当第一次访问的时候,
+  // isPrefetch_会被设置为false. 但内存紧张时, prefetch pages不应该占用cache pages
+  // 太多比例.
+  //
+  const auto cachePages = cache_->incrementCachedPages(0);
   const auto prefetchPages = cache_->incrementPrefetchPages(0);
   if (numPages + prefetchPages < cachePages / 2) {
     // The planned prefetch plus other prefetches are under half the cache.
@@ -105,6 +111,10 @@ bool isPrefetchPct(int32_t pct) {
   return pct >= FLAGS_cache_prefetch_min_pct;
 }
 
+// 将request的范围按照loadQuantum切分成多个部分, 这样做几个好处:
+// 1. 避免一次性load的太多数据
+// 2. 方便按照loadQuantum大小进行prefetch
+// 另外, 这里的逻辑需要和CacheInputStream::loadPosition()保持一致.
 std::vector<CacheRequest*> makeRequestParts(
     CacheRequest& request,
     const cache::TrackingData& trackingData,
@@ -479,6 +489,11 @@ void CachedBufferedInput::readRegion(
         options_.maxCoalesceDistance());
   }
   allCoalescedLoads_.push_back(load);
+
+  // 这里并没有真正去读取数据, 而是将多个读取操作映射到同一个io load上,
+  // 即一次coalesced io load可以一把读取将多个邻近的数据. 当其中一个
+  // request需要读取数据时(CacheInputStream::Next), 会真正执行load
+  // 操作, 它顺便将其他request需要的数据也读取上来.
   coalescedLoads_.withWLock([&](auto& loads) {
     for (auto& request : requests) {
       loads[request->stream] = load;
@@ -503,6 +518,7 @@ void CachedBufferedInput::readRegions(
     std::vector<int32_t> doneIndices;
     for (auto i = 0; i < allCoalescedLoads_.size(); ++i) {
       auto& load = allCoalescedLoads_[i];
+      // CoalescedLoad创建后的初始状态为kPlanned
       if (load->state() == CoalescedLoad::State::kPlanned) {
         executor_->add(
             [pendingLoad = load, ssdSavable = !options_.noCacheRetention()]() {
@@ -566,8 +582,11 @@ bool CachedBufferedInput::prefetch(Region region) {
   if (!shouldPreload(numPages)) {
     return false;
   }
+
+  // StreamIdentifier为null时, 执行load时总会出发prefetch
   auto stream = enqueue(region, nullptr);
   load(LogType::FILE);
+
   // Remove the coalesced load made for the stream. It will not be accessed. The
   // cache entry will be accessed.
   coalescedLoad(stream.get());
