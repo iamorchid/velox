@@ -1,4 +1,5 @@
 %{
+#define register
 #include <vector>
 #include <memory>
 #include <map>

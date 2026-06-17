@@ -38,27 +38,33 @@ void yyFlexLexer::yy_switch_to_buffer(yy_buffer_state*) {
 yy_buffer_state* yyFlexLexer::yy_create_buffer(std::istream* s, int size) {
   VELOX_FAIL("Bad call to yyFlexLexer::yy_create_buffer()");
 }
+#ifdef VELOX_YYFLEXLEXER_HAS_ISTREAM_REF_OVERLOADS
 yy_buffer_state* yyFlexLexer::yy_create_buffer(std::istream& s, int size) {
   VELOX_FAIL("Bad call to yyFlexLexer::yy_create_buffer()");
 }
+#endif
 void yyFlexLexer::yy_delete_buffer(yy_buffer_state* b) {
   VELOX_FAIL("Bad call to yyFlexLexer::yy_delete_buffer()");
 }
 void yyFlexLexer::yyrestart(std::istream* s) {
   VELOX_FAIL("Bad call to yyFlexLexer::yyrestart()");
 }
+#ifdef VELOX_YYFLEXLEXER_HAS_ISTREAM_REF_OVERLOADS
 void yyFlexLexer::yyrestart(std::istream& s) {
   VELOX_FAIL("Bad call to yyFlexLexer::yyrestart()");
 }
+#endif
 void yyFlexLexer::yypush_buffer_state(yy_buffer_state* new_buffer) {
   VELOX_FAIL("Bad call to yyFlexLexer::yypush_buffer_state()");
 }
 void yyFlexLexer::yypop_buffer_state() {
   VELOX_FAIL("Bad call to yyFlexLexer::yypop_buffer_state()");
 }
+#ifdef VELOX_YYFLEXLEXER_HAS_ISTREAM_REF_OVERLOADS
 void yyFlexLexer::switch_streams(std::istream& new_in, std::ostream& new_out) {
   VELOX_FAIL("Bad call to yyFlexLexer::switch_streams()");
 }
+#endif
 void yyFlexLexer::switch_streams(std::istream* new_in, std::ostream* new_out) {
   VELOX_FAIL("Bad call to yyFlexLexer::switch_streams()");
 }

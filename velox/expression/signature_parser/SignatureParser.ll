@@ -1,5 +1,6 @@
 %option 8bit
 %{
+#define register
 #include <vector>
 #include <memory>
 
