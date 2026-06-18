@@ -428,6 +428,8 @@ size_t MemoryPool::getPreferredSize(size_t size) {
   if (size < 8) {
     return 8;
   }
+  // 上面的if条件保证size不为0, 因此bits::countLeadingZeros返回结果
+  // 一定会小于或者等于63.
   int32_t bits = 63 - bits::countLeadingZeros<uint64_t>(size);
   size_t lower = 1ULL << bits;
   // Size is a power of 2.
@@ -500,6 +502,8 @@ MemoryPoolImpl::~MemoryPoolImpl() {
         kMetricMemoryPoolCapacityGrowCount, numCapacityGrowths_);
   }
 
+  // 对于root类型的memory pool, MemoryManager::addRootPool 会初始化 
+  // destructionCb_ 为对 MemoryManager::dropPool(...) 的调用.
   if (destructionCb_ != nullptr) {
     destructionCb_(this);
   }
@@ -547,7 +551,7 @@ void* MemoryPoolImpl::allocate(
 
   CHECK_AND_INC_MEM_OP_STATS(this, Allocs);
   const auto alignedSize = sizeAlign(size);
-  reserve(alignedSize);
+  reserve(alignedSize /*, reserveOnly = false */);
   void* buffer = allocator_->allocateBytes(alignedSize, alignment_);
   if (FOLLY_UNLIKELY(buffer == nullptr)) {
     release(alignedSize);
@@ -912,6 +916,8 @@ std::shared_ptr<MemoryPool> MemoryPoolImpl::genChild(
           .customArbitrator = arbitrator_});
 }
 
+// 这里是先将需要的memory pool的reservationBytes_准备好 (可能会执行growCapacity), 
+// 否则, 一点点去增加内存空间, 可能执行一部分操作后才发现超过了内存限制 (导致做了无用功).
 bool MemoryPoolImpl::maybeReserve(uint64_t increment) {
   CHECK_AND_INC_MEM_OP_STATS(this, Reserves);
   TestValue::adjust(
@@ -934,6 +940,7 @@ bool MemoryPoolImpl::maybeReserve(uint64_t increment) {
   return true;
 }
 
+// 仅当调用maybeReserve时, 才会设置reserveOnly为true
 void MemoryPoolImpl::reserve(uint64_t size, bool reserveOnly) {
   if (FOLLY_LIKELY(trackUsage_)) {
     if (FOLLY_LIKELY(threadSafe_)) {
@@ -955,6 +962,9 @@ void MemoryPoolImpl::reserveThreadSafe(uint64_t size, bool reserveOnly) {
       increment = reservationSizeLocked(size);
       if (increment == 0) {
         if (reserveOnly) {
+          // 提前预留好固定的大小的空间, 同时不希望普通的release(即releaseOnly为false)
+          // 将预留的空间释放出去. 这样做是为了保证后续的操作有可用的内存 (避免操作执行到
+          // 一半时, 因为内存申请而失败).
           minReservationBytes_ = tsanAtomicValue(reservationBytes_);
         } else {
           usedReservationBytes_ += size;
@@ -1001,6 +1011,7 @@ void MemoryPoolImpl::incrementReservationThreadSafe(
     toImpl(parent_)->incrementReservationThreadSafe(requestor, size);
   }
 
+  // 对于Leaf/Intermediate MemoryPoolImpl, 将在这里直接返回
   if (maybeIncrementReservation(size)) {
     return;
   }
@@ -1020,6 +1031,7 @@ void MemoryPoolImpl::growCapacity(MemoryPool* requestor, uint64_t size) {
   ++numCapacityGrowths_;
 
   try {
+    // 这里会执行到 Operator::MemoryReclaimer::enterArbitration()
     MemoryPoolArbitrationSection arbitrationSection(requestor);
     arbitrator_->growCapacity(this, size);
   } catch (const VeloxRuntimeError& veloxError) {
@@ -1049,6 +1061,10 @@ bool MemoryPoolImpl::maybeIncrementReservation(uint64_t size) {
     // arbitration process. The memory arbitration process itself needs to
     // ensure the memory pool usage of the memory pool is within the capacity
     // limit after the arbitration operation completes.
+    //
+    // underMemoryArbitration()为true时, 表明query当前处于reclaim状态, 此时需要
+    // 允许spill操作本身分配内存成功 (query中的所有tasks已经被pause).
+    //
     if (FOLLY_UNLIKELY(
             (reservationBytes_ + size > capacity_) &&
             !underMemoryArbitration())) {
@@ -1072,6 +1088,13 @@ void MemoryPoolImpl::release() {
   release(0, true);
 }
 
+//
+// release函数线将usedReservationBytes_缩小, 当缩小足够多时, 并将
+// reservationBytes_也缩小. 但release函数不会改变当前的capacity_,
+// 当下次进行reserve操作时, 就没有必要进行growCapacity()操作了.
+// 而arbitrator调用pool的shrink(...)函数时, 则对pool的capacity_
+// 进行收缩 (将capacity收回到全局capacity中).
+//
 void MemoryPoolImpl::release(uint64_t size, bool releaseOnly) {
   if (FOLLY_LIKELY(trackUsage_)) {
     if (FOLLY_LIKELY(threadSafe_)) {
@@ -1082,6 +1105,7 @@ void MemoryPoolImpl::release(uint64_t size, bool releaseOnly) {
   }
 }
 
+// 当前仅当调用MemoryPoolImpl::release()时, releaseOnly才为true
 void MemoryPoolImpl::releaseThreadSafe(uint64_t size, bool releaseOnly) {
   VELOX_CHECK(isLeaf());
   VELOX_DCHECK_NOT_NULL(parent_);
@@ -1092,6 +1116,7 @@ void MemoryPoolImpl::releaseThreadSafe(uint64_t size, bool releaseOnly) {
     int64_t newQuantized;
     if (FOLLY_UNLIKELY(releaseOnly)) {
       VELOX_DCHECK_EQ(size, 0);
+      // minReservationBytes_为0时, 表示不存在reserveOnly的内存空间
       if (minReservationBytes_ == 0) {
         return;
       }
@@ -1264,6 +1289,11 @@ uint64_t MemoryPoolImpl::shrink(uint64_t targetBytes) {
   return freeBytes;
 }
 
+///
+/// NOTE: this should only be called by memory arbitrator when a root memory
+/// pool tries to grow its capacity for a new reservation request which
+/// exceeds its current capacity limit.
+///
 bool MemoryPoolImpl::grow(uint64_t growBytes, uint64_t reservationBytes) {
   if (parent_ != nullptr) {
     return toImpl(parent_)->grow(growBytes, reservationBytes);

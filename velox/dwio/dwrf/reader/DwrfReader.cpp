@@ -331,6 +331,7 @@ DwrfRowReader::DwrfRowReader(
     dwio::common::typeutils::checkTypeCompatibility(
         *getReader().schema(), *columnSelector_, createExceptionContext);
   } else {
+    // 在执行SelectiveDwrfReader::build过程中, 会校验请求类型和文件类型的兼容性
     projectedNodes_ = std::make_shared<BitSet>(0);
     makeProjectedNodes(*getReader().schemaWithId(), *projectedNodes_);
   }
@@ -526,6 +527,8 @@ void DwrfRowReader::checkSkipStrides(uint64_t strideSize) {
     return;
   }
 
+  // 由 currentRowInStripe_ == 0 可以知道, 对于每个strip而言, 只需要计算一次, 
+  // 就可以知道需要跳过哪些strides.
   if (currentRowInStripe_ == 0 || recomputeStridesToSkip_) {
     StatsContext context(getReader().writerName(), getReader().writerVersion());
     DwrfData::FilterRowGroupsResult res;
@@ -544,6 +547,8 @@ void DwrfRowReader::checkSkipStrides(uint64_t strideSize) {
   while (currentStride < stridesToSkipSize_ &&
          bits::isBitSet(stridesToSkip_, currentStride)) {
     foundStridesToSkip = true;
+    // 函数最开始的if条件保证了此时currentRowInStripe_是strideSize对齐的, 即
+    // 不可能存在同一个stride中, 部分rows被跳过, 而其他rows保留.
     currentRowInStripe_ =
         std::min(currentRowInStripe_ + strideSize, rowsInCurrentStripe_);
     ++currentStride;
@@ -554,6 +559,7 @@ void DwrfRowReader::checkSkipStrides(uint64_t strideSize) {
   }
 }
 
+// 内部方法, 接口next(...)调用
 void DwrfRowReader::readNext(
     uint64_t rowsToRead,
     const dwio::common::Mutation* mutation,
@@ -569,6 +575,7 @@ void DwrfRowReader::readNext(
     // the wrapper reader.
     VELOX_CHECK_NULL(
         mutation, "Mutation pushdown is only supported in selective reader");
+    // 参见: StructColumnReader::next
     getColumnReader()->next(rowsToRead, result);
     if (startTime.has_value()) {
       decodingTimeCallback_(
@@ -599,6 +606,9 @@ int64_t DwrfRowReader::nextRowNumber() {
     return *nextRowNumber_;
   }
 
+  // strideSize参数用于指定每隔多少行生成一个Row Group (对应独立的RowIndex,
+  // 每个column会生成独立的INDEX stream用于保存所有的RowIndex), 一个orc stripe
+  // 可以包含多个groups.
   const auto strideSize = getReader().footer().rowIndexStride();
   while (currentStripe_ < stripeCeiling_) {
     if (currentRowInStripe_ == 0) {
@@ -620,10 +630,12 @@ int64_t DwrfRowReader::nextRowNumber() {
     }
 
     checkSkipStrides(strideSize);
+
     if (currentRowInStripe_ < rowsInCurrentStripe_) {
       if (strideSize > 0 && currentRowInStripe_ % strideSize == 0) {
         ++processedStrides_;
       }
+      // 可以看到, nextRowNumber_是整个文件级别的
       nextRowNumber_ = firstRowOfStripe_[currentStripe_] + currentRowInStripe_;
       return *nextRowNumber_;
     }

@@ -530,6 +530,8 @@ void Task::ensureBarrierSupport() const {
 
 void Task::init(std::optional<common::SpillDiskOptions>&& spillDiskOpts) {
   VELOX_CHECK(driverFactories_.empty());
+
+  // 这里会创建task级别的MemoryPool, 并为pool设置Task::MemoryReclaimer
   initTaskPool();
 
   setSpillDiskConfig(std::move(spillDiskOpts));
@@ -1128,6 +1130,7 @@ void Task::start(uint32_t maxDrivers, uint32_t concurrentSplitGroups) {
     {
       std::unique_lock<std::timed_mutex> l(mutex_);
       taskStats_.executionStartTimeMs = getCurrentTimeMs();
+      // Task刚创建时的state_为TaskState::kRunning
       if (!isRunningLocked()) {
         LOG(WARNING) << "Task " << taskId_
                      << " has already been terminated before start: "
@@ -1177,7 +1180,7 @@ void Task::createDriverFactoriesLocked(uint32_t maxDrivers) {
       consumerSupplier(),
       &driverFactories_,
       queryCtx_->queryConfig(),
-      maxDrivers);
+      maxDrivers /* max dirviers per pipeline */);
 
   // Calculates total number of drivers and create pipeline stats.
   for (auto& factory : driverFactories_) {
@@ -1186,8 +1189,13 @@ void Task::createDriverFactoriesLocked(uint32_t maxDrivers) {
     } else {
       numDriversUngrouped_ += factory->numDrivers;
     }
+
+    // 对于groupedExecution, numTotalDrivers包含了所有split groups总
+    // 的drivers数量 (有些groups尚未调度, 也可能根本不会调度到本task).
     numTotalDrivers_ += factory->numTotalDrivers;
     numDriversPerLeafNode_[factory->leafNodeId()] = factory->numDrivers;
+
+    // driver factory是按照pipeline ID顺序访问的
     taskStats_.pipelineStats.emplace_back(
         factory->inputDriver, factory->outputDriver);
   }
@@ -1217,7 +1225,9 @@ void Task::createAndStartDrivers(uint32_t concurrentSplitGroups) {
 
   // First, create drivers for ungrouped execution.
   if (numDriversUngrouped_ > 0) {
+    // 这里还会为LocalPartitionNode准备好local exchange使用的queues
     createSplitGroupStateLocked(kUngroupedGroupId);
+    
     // Create drivers.
     std::vector<std::shared_ptr<Driver>> drivers =
         createDriversLocked(kUngroupedGroupId);
@@ -1279,8 +1289,7 @@ void Task::initializePartitionOutput() {
       bufferManager,
       "Unable to initialize task. "
       "PartitionedOutputBufferManager was already destructed");
-  std::shared_ptr<const core::PartitionedOutputNode> partitionedOutputNode{
-      nullptr};
+  std::shared_ptr<const core::PartitionedOutputNode> partitionedOutputNode;
   int numOutputDrivers{0};
   {
     std::unique_lock<std::timed_mutex> l(mutex_);
@@ -1297,6 +1306,8 @@ void Task::initializePartitionOutput() {
             factory->needsPartitionedOutput(),
             "Only one output pipeline per task is supported");
       } else {
+        // PartitionedOutputNode基于plan中的partitioning scheme动态生成, 
+        // 参考: VeloxQueryPlanConverterBase::toVeloxQueryPlan
         partitionedOutputNode = factory->needsPartitionedOutput();
         if (partitionedOutputNode != nullptr) {
           numDriversInPartitionedOutput_ = factory->numDrivers;
@@ -1324,6 +1335,7 @@ void Task::initializePartitionOutput() {
     VELOX_CHECK_GT(numOutputDrivers, 0);
     bufferManager->initializeTask(
         shared_from_this(),
+        /* kPartitioned, kBroadcast or kArbitrary ? */
         partitionedOutputNode->kind(),
         partitionedOutputNode->numPartitions(),
         numOutputDrivers);
@@ -1352,8 +1364,24 @@ void Task::resume(std::shared_ptr<Task> self) {
   // suspended sections do not go back on thread during resume.
   self->pauseRequested_ = false;
   if (self->isRunningLocked()) {
+    //
+    // task处于paused状态时, driver会处于以下几个状体
+    // 1) suspended
+    //    driver进行memory reclaim之前, 会通过Task::enterSuspended将自己
+    //    设置为suspended状态 (仍然onThread, 但不参与op相关的操作). 内存回收
+    //    结束后, Task::leaveSuspended
+    // 2) enqueued (已经offThread)
+    //    从requestPause()到resume(), driver一直处在调度队列中, 见 Driver::enqueue(...)
+    // 3) blocked (已经offThread)
+    //    从requestPause()到resume(), driver一直处在等待队列中 (等待event唤醒),
+    //    见 BlockingState::setResume(...)
+    // 4) self->drivers_中的其他drivers (已经offThread)
+    //    driver在刚调度执行Driver::runInternal(...) 或者 退出Driver::runInternal(...)时, 
+    //    如果task已经pauseRequested_, 既不会进入调度队列, 也不会进入等待队列.
+    //
     for (auto& driver : self->drivers_) {
       if (driver != nullptr) {
+        // suspended(): state.numSuspensions > 0
         if (driver->state().suspended()) {
           // The Driver will come on thread in its own time as long as
           // the cancel flag is reset. This check needs to be inside 'mutex_'.
@@ -1467,12 +1495,16 @@ void Task::createSplitGroupStateLocked(uint32_t splitGroupId) {
       continue;
     }
 
+    // 如果pipleline中有LocalPartitionNode(对应presto中的LocalExchangeNode),
+    // 则需要准备好local exchange queues (每个driver对应一个). 上游pipeline会
+    // 往这些queue中投放数据.
     core::PlanNodePtr partitionNode;
     if (factory->needsLocalExchange(partitionNode)) {
       VELOX_CHECK_NOT_NULL(partitionNode);
       createLocalExchangeQueuesLocked(
           splitGroupId, partitionNode, factory->numDrivers);
     }
+
     addHashJoinBridgesLocked(splitGroupId, factory->needsHashJoinBridges());
     addNestedLoopJoinBridgesLocked(
         splitGroupId, factory->needsNestedLoopJoinBridges());
@@ -1515,6 +1547,7 @@ std::vector<std::shared_ptr<Driver>> Task::createDriversLocked(
     auto filters = std::make_shared<PipelinePushdownFilters>();
     for (uint32_t partitionId = 0; partitionId < factory->numDrivers;
          ++partitionId) {
+      // createDriver的实现定义在LocalPlanner.cpp文件中
       drivers.emplace_back(factory->createDriver(
           std::make_unique<DriverCtx>(
               self,
@@ -1763,6 +1796,11 @@ void Task::addRemoteSplit(
       auto remoteSplit =
           std::dynamic_pointer_cast<RemoteConnectorSplit>(split.connectorSplit);
       VELOX_CHECK(remoteSplit, "Wrong type of split");
+      // remoteSplit->taskId对应于presto中的RemoteSplit#location, 转换过程参见
+      // PrestoToVeloxSplit.cpp文件, location的格式如下, 其中bufferId用于指定本
+      // task应该消费消费上游task的哪片数据 (它和destination_字段是一致的).
+      // http://192.168.1.7:8080/v1/task/20221119_022459_00010_cdbxc.1.0.0/results/0
+      // http://192.168.1.7:8080/v1/task/{上游taskId}/results/{bufferId}
       exchangeClientByPlanNode_[planNodeId]->addRemoteTaskId(
           remoteSplit->taskId);
     }
@@ -2348,6 +2386,9 @@ void Task::setAllOutputConsumed() {
   bool allFinished;
   {
     std::lock_guard<std::timed_mutex> l(mutex_);
+    // TODO 
+    // 既然task的output已经被下有所有的tasks都消费完 (或者提前deleteResults), 
+    // 还有必要等到所有drivers都finished吗? 
     partitionedOutputConsumed_ = true;
     allFinished = checkIfFinishedLocked();
   }
@@ -2380,6 +2421,9 @@ bool Task::checkIfFinishedLocked() {
   }
 
   if (allFinished) {
+    // allFinished进表示所有的drivers已经完成, 但output buffer中的数据可能还没有
+    // 被取走 (PartitionedOutput算子将数据全部投递到OutputBufferManager中后, 对
+    // 应的driver就可以退出了).
     if (!hasPartitionedOutput() || partitionedOutputConsumed_) {
       taskStats_.endTimeMs = getCurrentTimeMs();
       return true;
@@ -2687,12 +2731,9 @@ ContinueFuture Task::terminate(TaskState terminalState) {
     // after terminate as tests expect.
     numRunningDrivers_ = 0;
     for (auto& driver : drivers_) {
-      if (driver) {
-        if (enterForTerminateLocked(driver->state()) ==
-            StopReason::kTerminate) {
-          offThreadDrivers.push_back(std::move(driver));
-          driverClosedLocked();
-        }
+      if (driver && enterForTerminateLocked(driver->state()) == StopReason::kTerminate) {
+        offThreadDrivers.push_back(std::move(driver));
+        driverClosedLocked();
       }
     }
     exchangeClients.swap(exchangeClients_);
@@ -2715,7 +2756,7 @@ ContinueFuture Task::terminate(TaskState terminalState) {
 
   // We continue all Drivers waiting for promises known to the
   // Task. The Drivers are now detached from Task and therefore will
-  // not go on thread. The reference in the future callback is
+  // not go on-thread. The reference in the future callback is
   // typically the last one.
   maybeRemoveFromOutputBufferManager();
 
@@ -3468,11 +3509,16 @@ std::string Task::errorMessage() const {
   return errorMessageLocked();
 }
 
+// [star][task] Task::enter和Task::leave都是在Driver::runInternal中用到
 StopReason Task::enter(ThreadState& state, uint64_t nowMicros) {
   TestValue::adjust("facebook::velox::exec::Task::enter", this);
   std::lock_guard<std::timed_mutex> l(mutex_);
   VELOX_CHECK(state.isEnqueued);
+  
+  // 这里在将state切换为terminated或者onThread之前, 
+  // 先将enqueued置为false
   state.isEnqueued = false;
+  
   if (state.isTerminated) {
     return StopReason::kAlreadyTerminated;
   }
@@ -3482,29 +3528,35 @@ StopReason Task::enter(ThreadState& state, uint64_t nowMicros) {
   const auto reason = shouldStopLocked();
   if (reason == StopReason::kTerminate) {
     state.isTerminated = true;
-  }
-  if (reason == StopReason::kNone) {
+  } else if (reason == StopReason::kNone) {
     ++numThreads_;
     if (numThreads_ == 1) {
       onThreadSince_ = nowMicros;
     }
-    state.setThread();
+    state.setThread(); // on-thread
     state.hasBlockingFuture = false;
   }
   return reason;
 }
 
 StopReason Task::enterForTerminateLocked(ThreadState& state) {
+  // [question]
+  // if 条件中的 state.isTerminated 判断, 感觉多余. 在task完成terminate(...)
+  // 操作之前, 对于offThread的driver, 谁还会将state.isTerminated设置为true?
+  // enterForTerminateLocked(...) 本身也不会调用多次.
   if (state.isOnThread() || state.isTerminated) {
-    state.isTerminated = true;
+    state.isTerminated = true; 
     return StopReason::kAlreadyOnThread;
   }
+
   if (pauseRequested_) {
     // NOTE: if the task has been requested to pause, then we let the task
     // resume code path to close these off thread drivers.
     return StopReason::kPause;
   }
+
   state.isTerminated = true;
+  // 为了满足enter的语义(毕竟函数名称是: enterForTerminateLocked)
   state.setThread();
   return StopReason::kTerminate;
 }
@@ -3527,6 +3579,8 @@ void Task::leave(
         state.isTerminated = true;
       }
     } else {
+      // 这里的逻辑就很诡异, 对于这种情况, Task::enter中采用的是
+      // kAlreadyTerminated, 而这里为何又是kTerminate？
       reason = StopReason::kTerminate;
     }
     if ((reason != StopReason::kTerminate) || (driverCb == nullptr)) {
@@ -3548,7 +3602,7 @@ void Task::leave(
   if (--numThreads_ == 0) {
     threadFinishPromises = allThreadsFinishedLocked();
   }
-  state.clearThread();
+  state.clearThread(); // off-thread
 }
 
 StopReason Task::enterSuspended(ThreadState& state) {
@@ -3578,6 +3632,8 @@ StopReason Task::enterSuspended(ThreadState& state) {
           reason == StopReason::kYield,
       "Unexpected stop reason on suspension: {}",
       reason);
+
+  // suspended(): state.numSuspensions > 0
   if (++state.numSuspensions > 1) {
     // Only the first suspension request needs to update the running driver
     // thread counter in the task.
@@ -3632,6 +3688,8 @@ StopReason Task::leaveSuspended(ThreadState& state) {
   }
 }
 
+// Driver在执行过程中, 会检查task已经被请求stop了, 如果是, 则提前退出loop.
+// 否则, 一直运行, 直到时间片全部用完.
 StopReason Task::shouldStop() {
   if (pauseRequested_) {
     return StopReason::kPause;
@@ -3669,6 +3727,7 @@ StopReason Task::shouldStopLocked() {
   if (pauseRequested_) {
     return StopReason::kPause;
   }
+  // 见 Task::setError -> Task::terminate
   if (terminateRequested_) {
     return StopReason::kTerminate;
   }
@@ -3721,7 +3780,7 @@ void Task::createExchangeClientLocked(
   // buffer size of the producers.
   exchangeClients_[pipelineId] = std::make_shared<ExchangeClient>(
       taskId_,
-      destination_,
+      destination_ /* 标识从上游tasks的那个OutputBuffer消费数据 */,
       queryCtx()->queryConfig().maxExchangeBufferSize(),
       numberOfConsumers,
       queryCtx()->queryConfig().minExchangeOutputBatchBytes(),

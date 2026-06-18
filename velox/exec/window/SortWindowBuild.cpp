@@ -70,6 +70,7 @@ SortWindowBuild::SortWindowBuild(
 }
 
 void SortWindowBuild::addInput(RowVectorPtr input) {
+  // inputChannels_已经按照特定的顺序进行组织了
   for (auto i = 0; i < inputChannels_.size(); ++i) {
     decodedInputVectors_[i].decode(*input->childAt(inputChannels_[i]));
   }
@@ -306,7 +307,7 @@ void SortWindowBuild::noMoreInput() {
     sortPartitions();
   }
 
-  // Releases the unused memory reservation after procesing input.
+  // Releases the unused memory reservation after processing input.
   pool_->release();
 }
 
@@ -407,6 +408,8 @@ bool SortWindowBuild::hasNextPartition() {
     loadNextPartitionBatchFromSpill();
   }
 
+  // partitionStartRows_中, 最后一个元素是final partition的end row (exclusive).
+  // 另外, currentPartition_初始值为-1.
   return partitionStartRows_.size() > 0 &&
       currentPartition_ < static_cast<int>(partitionStartRows_.size() - 2);
 }

@@ -102,6 +102,17 @@ void addSubfields(
     int level,
     memory::MemoryPool* pool,
     common::ScanSpec& spec) {
+  //
+  // 对于 schema: (name varchar, info (info1 row(city varchar, country varchar), info2 row(city varchar, country varchar)))
+  // 1) select name from t where info.info1 is not null
+  // 2) select name from t where info.info1 is not null and info.info1.city is not null
+  // 3) select name, info.info1 from t where info.info1 is not null
+  //
+  // 对于第一种情况, 对info进行addSubfields操作时, 没有必要读取info.info1下的字段数据, 即自动填充null constant
+  // 对于第二种情况, 只会定义 "info.info1.city" 这个subfield ?
+  // 对于第三种情况, 需要读取info.info1每个字段的内容
+  //
+  
   int newSize = 0;
   for (int i = 0; i < subfields.size(); ++i) {
     if (level < subfields[i].subfield->path().size()) {
@@ -128,6 +139,9 @@ void addSubfields(
         auto* child = spec.addField(childName, i);
         auto it = required.find(childName);
         if (it == required.end()) {
+          // 对于 select f1, f2.name from t where f2.age > 0 这种SQL, TabelScan需要
+          // 返回列f1和f2, 然后Project通过 DEREFERENCE 的方式来提取需要的内容. 对于f2中其
+          // 他字段, TableScan是没有必要返回真实数据的(Project根本不会用到).
           child->setConstantValue(
               BaseVector::createNullConstant(childType, 1, pool));
         } else {
@@ -329,6 +343,7 @@ void processFieldSpec(
       auto* keys = spec.childByName(common::ScanSpec::kMapKeysFieldName);
       VELOX_CHECK_NOT_NULL(keys);
       if (keys->filter()) {
+        // 确保不允许返回null的map keys
         VELOX_CHECK(!keys->filter()->testNull());
       } else {
         keys->setFilter(std::make_shared<common::IsNotNull>());
@@ -391,6 +406,8 @@ std::shared_ptr<common::ScanSpec> makeScanSpec(
 }
 
 std::shared_ptr<common::ScanSpec> makeScanSpec(
+    // 和TableScan输出对应的底层table的RowType, 它们字段名称可以不一样, 但类型保持一致.
+    // 底层table的RowType的字段为底层存储的column名称
     const RowTypePtr& rowType,
     const folly::F14FastMap<std::string, std::vector<const common::Subfield*>>&
         outputSubfields,
@@ -448,6 +465,8 @@ std::shared_ptr<common::ScanSpec> makeScanSpec(
     it = filterSubfields.find(name);
     if (it != filterSubfields.end()) {
       for (auto* subfield : it->second) {
+        // 这里可能会和outputSubfields中subfield重复, 但没有关系,
+        // addSubfields会优先使用来自output的SubfieldSpec.
         subfieldSpecs.push_back({subfield, true});
       }
       filterSubfields.erase(it);
@@ -459,6 +478,7 @@ std::shared_ptr<common::ScanSpec> makeScanSpec(
   }
 
   // Now process the columns that will not be projected out.
+  // 谓词下推并裁减后, TableScan可以不输出下推后的谓词column
   if (!filterSubfields.empty()) {
     VELOX_CHECK_NOT_NULL(dataColumns);
     for (auto& [fieldName, subfields] : filterSubfields) {

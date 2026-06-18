@@ -40,12 +40,14 @@ inline constexpr bool kIsNumericScalar = std::is_arithmetic_v<T> ||
 template <typename T>
 void SelectiveColumnReader::ensureValuesCapacity(
     vector_size_t numRows,
-    bool preserveData) {
+    bool preserveData /* false */) {
   if (values_ && (isFlatMapValue_ || values_->unique()) &&
       values_->capacity() >=
           BaseVector::byteSize<T>(numRows) + simd::kPadding) {
     return;
   }
+  // AlignedBuffer::allocate本身就会考虑simd::kPadding, 这里额外处理
+  // simd::kPadding, 感觉是多余的
   auto newValues =
       AlignedBuffer::allocate<T>(numRows + simd::kPadding / sizeof(T), pool_);
   if (preserveData) {
@@ -60,8 +62,15 @@ template <typename T>
 void SelectiveColumnReader::prepareRead(
     int64_t offset,
     const RowSet& rows,
+    // incomingNulls包含了父column中rows为nulls的信息. 输入参数rows可以是dense, 
+    // 也可以不是; 可以对应null, 也可以不是. 比如rows为[0, 20-30, 50, 200-1000],
+    // 则incomingNulls至少覆盖 1000+1 个bits. 
+    // 对于orc的情况, 只有incomingNulls中bit为1的row, child column才会对应的值,
+    // child column的值可以是null, 也可以不是。
     const uint64_t* incomingNulls) {
   const vector_size_t numRows = rows.back() + 1;
+
+  // 当前读取范围内的所有rows的nulls情况会放入nullsInReadRange_
   readNulls(offset, numRows, incomingNulls);
 
   // We check for all nulls and no nulls. We expect both calls to
@@ -70,13 +79,12 @@ void SelectiveColumnReader::prepareRead(
   // this to 0 and the total number of rows but this would end up
   // reading more in the mixed case and would not be better in the all
   // (non)-null case.
-  allNull_ = nullsInReadRange_ &&
-      bits::isAllSet(
-                 nullsInReadRange_->as<uint64_t>(), 0, numRows, bits::kNull);
-  if (nullsInReadRange_ &&
-      bits::isAllSet(
-          nullsInReadRange_->as<uint64_t>(), 0, numRows, bits::kNotNull)) {
-    nullsInReadRange_ = nullptr;
+  if (nullsInReadRange_) {
+    const uint64_t* rawNulls = nullsInReadRange_->as<uint64_t>();
+    allNull_ = bits::isAllSet(rawNulls, 0, numRows, bits::kNull);
+    if (bits::isAllSet(rawNulls, 0, numRows, bits::kNotNull)) {
+      nullsInReadRange_ = nullptr;
+    }
   }
 
   innerNonNullRows_.clear();
@@ -87,11 +95,15 @@ void SelectiveColumnReader::prepareRead(
   numValues_ = 0;
   valueSize_ = sizeof(T);
   inputRows_ = rows;
+
+  // 如果column没有定义filter, 则输出的values个数和inputRows_保持一致.
+  // 否则, 输出值对应行号保存到outputRows_中.
   if (scanSpec_->filter() || hasDeletion()) {
     outputRows_.reserve(rows.size());
   }
 
   ensureValuesCapacity<T>(rows.size());
+
   if (scanSpec_->keepValues() && !scanSpec_->valueHook()) {
     valueRows_.clear();
     prepareNulls(rows, nullsInReadRange_ != nullptr);
@@ -148,6 +160,12 @@ void SelectiveColumnReader::getFlatValues(
   }
 
   if (valueSize_ == sizeof(TVector)) {
+    // 这里之所以需要进行compact, 是因为struct column允许对child column逐级进行filter. 
+    // 比如一开始rows为[0, 999], child#1执行filter后, 只有范围为[100, 399]的rows满足需要, 
+    // 因此child#1的output rows为[100, 399], 且为这个range的rows准备好了values. 但当
+    // 执行child#2执行它的filter后, [100, 399]范围内的rows只有[200, 299]满足, 此时对整体
+    // 输出而言, 只应该输出[200, 299]范围内的100个rows. 因此, child#1之前多余的结果需要裁剪
+    // 掉, 即对应这里的compact.
     compactScalarValues<TVector, TVector>(rows, isFinal);
   } else if (sizeof(T) >= sizeof(TVector)) {
     compactScalarValues<T, TVector>(rows, isFinal);

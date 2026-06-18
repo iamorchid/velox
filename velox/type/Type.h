@@ -57,6 +57,12 @@ using column_index_t = uint32_t;
 constexpr column_index_t kConstantChannel =
     std::numeric_limits<column_index_t>::max();
 
+//
+// 我们可以扩展任意的Type类型, 但使用TypeKind却必须是velox内置定义好的.
+// TypeKind和存储结构有关, 而Type类型(包括继承类)则描述业务逻辑属性.
+// 比如, VarcharType类型 (表示字符串) 可以使用TypeKind::VARCHAR,
+// JsonType 也可以使用TypeKind::VARCHAR.
+//
 /// Velox type system supports a small set of SQL-compatible composeable types:
 /// BOOLEAN, TINYINT, SMALLINT, INTEGER, BIGINT, HUGEINT, REAL, DOUBLE, VARCHAR,
 /// VARBINARY, TIMESTAMP, ARRAY, MAP, ROW
@@ -131,6 +137,9 @@ struct TypeTraits {};
 template <>
 struct TypeTraits<TypeKind::BOOLEAN> {
   using ImplType = ScalarType<TypeKind::BOOLEAN>;
+  /**
+   * NativeType 表示的是和TypeKind对应的具体的内存结构
+   */
   using NativeType = bool;
   using DeepCopiedType = NativeType;
   static constexpr uint32_t minSubTypes = 0;

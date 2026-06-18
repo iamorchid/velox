@@ -92,7 +92,7 @@ class AsyncSource {
     common::testutil::TestValue::adjust(
         "facebook::velox::AsyncSource::move", this);
     std::function<std::unique_ptr<Item>()> itemMaker{nullptr};
-    ContinueFuture wait;
+    ContinueFuture wait; // 默认 `valid() == true`
     {
       std::lock_guard<std::mutex> l(mutex_);
       const auto currentState = state();
@@ -226,8 +226,8 @@ class AsyncSource {
   //       │   │                      │                     │    │
   //       │   │ close()              │ exception           │    │ cancel()
   //       │   │                      ▼                     │    │
-  //       │   │                ┌──────────┐   move()       │    │
-  //       │   │                │ kFailed  │   close()      │    │
+  //       │   │                ┌──────────┐         move() │    │
+  //       │   │                │ kFailed  │        close() │    │
   //       │   │                └──────────┘                │    │
   //       │   │                                            │    │
   //       │   └──────────────────────┬─────────────────────┘    │

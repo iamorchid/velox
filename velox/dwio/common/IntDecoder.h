@@ -131,6 +131,7 @@ class IntDecoder {
   template <bool kHasNulls>
   inline void skip(int32_t numValues, int32_t current, const uint64_t* nulls) {
     if constexpr (kHasNulls) {
+      // range is [current, current + numValues)
       numValues = bits::countNonNulls(nulls, current, current + numValues);
     }
     pendingSkip_ += numValues;

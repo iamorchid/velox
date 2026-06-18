@@ -40,18 +40,19 @@ TEST(ColumnSelectorTests, testBasicFilterTree) {
   const int32_t expectedNodes = 12;
   std::array<uint64_t, 12> columns{MAX_UINT64, 0, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4};
   std::array<std::string, 12> names{
-      "_ROOT_",
-      "id",
-      "values",
-      "values.[ITEM]",
-      "tags",
-      "tags.[KEY]",
-      "tags.[VALUE]",
-      "notes",
-      "notes.f1",
-      "notes.f2",
-      "notes.f3",
-      "memo"};
+      "_ROOT_", // 0
+      "id", // 1
+      "values", // 2
+      "values.[ITEM]", // 3
+      "tags", // 4
+      "tags.[KEY]", // 5
+      "tags.[VALUE]", // 6
+      "notes", // 7
+      "notes.f1", // 8
+      "notes.f2", // 9
+      "notes.f3", // 10
+      "memo" // 11
+    };
   {
     ColumnSelector s1(type);
     EXPECT_TRUE(s1.shouldReadAll());
@@ -159,7 +160,7 @@ TEST(ColumnSelectorTests, testBasicFilterTree) {
 
   // filter through row read options - reversed
   {
-    std::vector<uint64_t> opts1{1, 2, 3};
+    std::vector<uint64_t> opts1{1, 2, 3}; // column idx
     std::vector<std::string> opts2{"values", "tags", "notes"};
 
     std::array<bool, 12> nodesReadState{
@@ -178,7 +179,7 @@ TEST(ColumnSelectorTests, testBasicFilterTree) {
 
     std::array<bool, 5> columnsReadState{false, true, true, true, false};
 
-    ColumnSelector s5(type, opts1);
+    ColumnSelector s5(type, opts1); // read by column idx
     ColumnSelector s6(type, opts2);
 
     EXPECT_FALSE(s5.shouldReadAll());

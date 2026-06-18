@@ -124,6 +124,7 @@ class ColumnSelector {
       const std::shared_ptr<const velox::RowType>& schema,
       const std::shared_ptr<const velox::RowType>& contentSchema,
       const std::vector<uint64_t>& ids,
+      // filterByNodes为false, 表示ids对应的是top level的column index
       const bool filterByNodes = false,
       MetricsLogPtr log = nullptr,
       bool fileColumnNamesReadAsLowerCase = false)

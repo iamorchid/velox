@@ -78,6 +78,7 @@ class ColumnReader {
       VectorPtr& result,
       const uint64_t* incomingNulls);
 
+  // TODO 这里应该采用BooleanRleDecoder ??
   std::unique_ptr<ByteRleDecoder> notNullDecoder_;
   const std::shared_ptr<const dwio::common::TypeWithId> fileType_;
   memory::MemoryPool& memoryPool_;

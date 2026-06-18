@@ -148,6 +148,13 @@ RowContainer::RowContainer(
       accumulators_(accumulators),
       rows_(pool),
       rowPointers_(StlAllocator<char*>(stringAllocator_.get())) {
+  //
+  // RowContainer中, 每一行的布局:
+  //                rowPtr                                        rowSizeOffset_  nextOffset_
+  //                  ||                                               ||            ||
+  //                  \/                                               \/            \/
+  // [normalizedKey], keys, flag bits, accumulators, dependent fields, [varRowSize], [nextRowPtr]
+  //
   // Compute the layout of the payload row.  The row has keys, null flags,
   // accumulators, dependent fields. All fields are fixed width. If variable
   // width data is referenced, this is done with StringView(for VARCHAR) and
@@ -193,7 +200,7 @@ RowContainer::RowContainer(
   // Make offset at least sizeof pointer so that there is space for a
   // free list next pointer below the bit at 'freeFlagOffset_'.
   offset = std::max<int32_t>(offset, sizeof(void*));
-  const int32_t firstAggregateOffset = offset;
+  const int32_t flagBitsOffset = offset;
   if (!accumulators.empty()) {
     // This moves flagOffset to the start of the next byte.
     // This is to guarantee the null and initialized bits for an aggregate
@@ -205,6 +212,7 @@ RowContainer::RowContainer(
     nullOffsets_.push_back(flagOffset);
     // Increment for two bits: null bit and following initialized bit.
     flagOffset += kNumAccumulatorFlags;
+  
     isVariableWidth |= !accumulator.isFixedSize();
     usesExternalMemory_ |= accumulator.usesExternalMemory();
     alignment_ = combineAlignments(accumulator.alignment(), alignment_);
@@ -216,18 +224,20 @@ RowContainer::RowContainer(
     ++flagOffset;
     isVariableWidth |= !type->isFixedWidth();
   }
+
   if (hasProbedFlag) {
-    probedFlagOffset_ = flagOffset + firstAggregateOffset * 8;
+    probedFlagOffset_ = flagOffset + flagBitsOffset * 8;
     ++flagOffset;
   }
+
   // Free flag.
-  freeFlagOffset_ = flagOffset + firstAggregateOffset * 8;
+  freeFlagOffset_ = flagOffset + flagBitsOffset * 8;
   ++flagOffset;
   // Add 1 to the last null offset to get the number of bits.
   flagBytes_ = bits::nbytes(flagOffset);
   // Fixup 'nullOffsets_' to be the bit number from the start of the row.
   for (int32_t i = 0; i < nullOffsets_.size(); ++i) {
-    nullOffsets_[i] += firstAggregateOffset * 8;
+    nullOffsets_[i] += flagBitsOffset * 8;
   }
   offset += flagBytes_;
   for (const auto& accumulator : accumulators) {
@@ -292,6 +302,7 @@ char* RowContainer::newRow() {
       rowPointers_.push_back(row);
     }
   }
+  // 由eraseRows知道, free列表中的rows已经执行过相关的内存释放了
   return initializeRow(row, false /* reuse */);
 }
 
@@ -305,6 +316,10 @@ void RowContainer::setAllNull(char* row) {
   }
 }
 
+//
+// reuse为true, 表示想复用正在使用的row的固定空间(比如TopN时, 替换淘汰的row),
+// 此时需要将对应row占用的资源进行释放. 
+//
 char* RowContainer::initializeRow(char* row, bool reuse) {
   if (reuse) {
     auto rows = folly::Range<char**>(&row, 1);
@@ -312,8 +327,8 @@ char* RowContainer::initializeRow(char* row, bool reuse) {
     freeAggregates(rows);
     VELOX_CHECK_EQ(nextOffset_, 0);
   } else if (rowSizeOffset_ != 0) {
-    // zero out string views so that clear() will not hit uninited data. The
-    // fastest way is to set the whole row to 0.
+    // zero out string views so that clear() will not hit uninited data. 
+    // The fastest way is to set the whole row to 0.
     ::memset(row, 0, fixedRowSize_);
   }
   if (!nullOffsets_.empty()) {
@@ -321,6 +336,7 @@ char* RowContainer::initializeRow(char* row, bool reuse) {
     // initialized bit follows the null bit).
     ::memset(row + nullByte(nullOffsets_[0]), 0x0, flagBytes_);
   }
+  // row为可变长度时, 会定义rowSizeOffset_
   if (rowSizeOffset_) {
     variableRowSize(row) = 0;
   }
@@ -426,6 +442,10 @@ void RowContainer::freeVariableWidthFields(folly::Range<char**> rows) {
 
 void RowContainer::freeAggregates(folly::Range<char**> rows) {
   for (auto& accumulator : accumulators_) {
+    // TODO 如果是clear的场景, 应该用这个有if判断的版本
+    // if (accumulator.usesExternalMemory()) {
+    //   accumulator.destroy(rows);
+    // }
     accumulator.destroy(rows);
   }
 }
@@ -535,6 +555,8 @@ void RowContainer::store(
         row,
         offsets_[columnIndex]);
   } else {
+    // 只能对key或者dependent列进行store操作, 聚合列只允许聚合函数自己
+    // 进行初始化以及内部状态维护, 不允许通过store直接进行列设置.
     VELOX_DCHECK(isKey || accumulators_.empty());
     auto rowColumn = rowColumns_[columnIndex];
     VELOX_DYNAMIC_TYPE_DISPATCH_ALL(

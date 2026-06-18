@@ -99,6 +99,7 @@ std::unique_ptr<FooterWrapper> parseFooter(
 
 } // namespace
 
+// ORC文件格式解析
 ReaderBase::ReaderBase(
     const dwio::common::ReaderOptions& options,
     std::unique_ptr<dwio::common::BufferedInput> input)
@@ -125,6 +126,8 @@ ReaderBase::ReaderBase(
   auto* rawFooterBuffer = footerBuffer->asMutable<char>();
   input_->read(fileLength_ - footerBufSize, footerBufSize, LogType::FOOTER)
       ->readFully(rawFooterBuffer, footerBufSize);
+  
+  // orc文件的最后一个自己用于描述postscript的大小, 即postscript的大小不能超过255个字节.
   int32_t footerOffset = footerBufSize - 1;
   psLength_ = static_cast<uint8_t>(rawFooterBuffer[footerOffset]);
   VELOX_CHECK_LE(
@@ -143,6 +146,7 @@ ReaderBase::ReaderBase(
   }
 
   const uint64_t footerSize = postScript_->footerLength();
+  // 只有FileFormat::DWRF格式才会定义cacheSize
   const uint64_t cacheSize =
       postScript_->hasCacheSize() ? postScript_->cacheSize() : 0;
   const uint64_t tailSize = 1 + psLength_ + footerSize + cacheSize;
@@ -171,6 +175,7 @@ ReaderBase::ReaderBase(
     footerOffset -= footerSize;
     footerStart = rawFooterBuffer + footerOffset;
   } else {
+    // 走到这里, 说明之前读取时, 对footer的size预估小了.
     fullFooterBuffer =
         AlignedBuffer::allocate<char>(footerSize, &options_.memoryPool());
     footerStart = fullFooterBuffer->asMutable<char>();
@@ -316,6 +321,7 @@ std::unique_ptr<ColumnStatistics> ReaderBase::columnStatistics(
       ColumnStatisticsWrapper(&stats->statistics(index - root)), statsContext);
 }
 
+// 基于orc或者dwrf的文件, 来解析完整的类型信息
 std::shared_ptr<const Type> ReaderBase::convertType(
     const FooterWrapper& footer,
     uint32_t index,

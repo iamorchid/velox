@@ -78,8 +78,8 @@ std::ostream& operator<<(std::ostream& out, const StopReason& reason);
 /// On thread - 'thread' is set to the thread that is running the Driver. Next
 /// states are blocked, terminated, suspended, enqueued.
 ///
-///  Blocked - The Driver is not on thread and is waiting for an external event.
-///  Next states are terminated, enqueued.
+/// Blocked - The Driver is not on thread and is waiting for an external event.
+/// Next states are terminated, enqueued.
 ///
 /// Suspended - The Driver is on thread, 'thread' and 'isSuspended' are set. The
 /// thread does not manipulate the Driver's state and is suspended as in waiting
@@ -87,7 +87,7 @@ std::ostream& operator<<(std::ostream& out, const StopReason& reason);
 /// we keep the stack so that when the wait is over the control stack is not
 /// lost. Next states are on thread or terminated.
 ///
-///  Terminated - 'isTerminated' is set. The Driver cannot run after this and
+/// Terminated - 'isTerminated' is set. The Driver cannot run after this and
 /// the state is final.
 ///
 /// Task allows terminating or pausing a set of Drivers. The Task API
@@ -229,6 +229,7 @@ class BlockingState {
 /// Special group id to reflect the ungrouped execution.
 constexpr uint32_t kUngroupedGroupId{std::numeric_limits<uint32_t>::max()};
 
+/// 初始化时机参见: Task::createDriversLocked
 struct DriverCtx {
   const int driverId;
   const int pipelineId;
@@ -824,6 +825,7 @@ struct DriverFactory {
   /// Same as 'mixedExecutionModeHashJoinNodeIds' but for Nested Loop Joins.
   folly::F14FastSet<core::PlanNodeId> mixedExecutionModeNestedLoopJoinNodeIds;
 
+  // 定义在LocalPlanner.cpp中
   std::shared_ptr<Driver> createDriver(
       std::unique_ptr<DriverCtx> ctx,
       std::shared_ptr<ExchangeClient> exchangeClient,

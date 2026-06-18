@@ -201,6 +201,7 @@ UTF8PROC_DLLEXPORT utf8proc_bool utf8proc_codepoint_valid(utf8proc_int32_t uc) {
       ((utf8proc_uint32_t)uc < 0x110000);
 }
 
+// 把一个 Unicode 码点（uc）编码成 UTF‑8 字节序列，写入 dst，并返回写入的字节数
 UTF8PROC_DLLEXPORT utf8proc_ssize_t
 utf8proc_encode_char(utf8proc_int32_t uc, utf8proc_uint8_t* dst) {
   if (uc < 0x00) {

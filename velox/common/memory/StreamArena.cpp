@@ -20,6 +20,7 @@ namespace facebook::velox {
 
 StreamArena::StreamArena(memory::MemoryPool* pool) : pool_(pool) {}
 
+// HashStringAllocator::newRange重写了newRage的逻辑, 会用到lastRange
 void StreamArena::newRange(
     int64_t bytes,
     ByteRange* /*lastRange*/,

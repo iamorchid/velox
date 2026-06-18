@@ -165,6 +165,8 @@ uint64_t ArbitrationParticipant::maxReclaimableCapacity() const {
 
 uint64_t ArbitrationParticipant::reclaimableUsedCapacity() const {
   const auto maxReclaimableBytes = maxReclaimableCapacity();
+  // 由Operator::MemoryReclaimer::reclaimableBytes可以知道, reclaimable
+  // bytes对应的是memory pool的reservedBytes.
   const auto reclaimableBytes = pool_->reclaimableBytes();
   return std::min<int64_t>(maxReclaimableBytes, reclaimableBytes.value_or(0));
 }
@@ -293,6 +295,12 @@ uint64_t ArbitrationParticipant::reclaim(
     ++numReclaims_;
     VELOX_MEM_LOG(INFO) << "Reclaiming from memory pool " << pool_->name()
                         << " with target " << succinctBytes(targetBytes);
+    // 
+    // reclaimable的算子在执行完成后, 通过MemoryPoolImpl::free会释放出内存. 
+    // 释放内存后, memory pool的reservationBytes_将会缩减. 后面通过shrink(...)
+    // 操作对memory pool的capacity进行收缩, 并将收缩得到的量放回全局的free
+    // capacity中 (满足后续memory pool的growCapacity的需求).
+    //
     auto reclaimedBytes =
         pool_->reclaim(targetBytes, maxWaitTimeNs / 1'000'000, stats);
     reclaimedCapacity = shrink(/*reclaimAll=*/false);

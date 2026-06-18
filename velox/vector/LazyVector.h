@@ -35,7 +35,7 @@ using RowSet = folly::Range<const vector_size_t*>;
 // way one can bypass copying data into a vector before use.
 class ValueHook {
  public:
-  // Type and constants for identifying specific hooks.  Loaders may have
+  // Type and constants for identifying specific hooks. Loaders may have
   // hook-specialized template instantiations for some operations.
   enum Kind {
     kGeneric,
@@ -253,9 +253,10 @@ class ChainedVectorLoader : public VectorLoader {
 // ever be accessed, loading can be limited to these positions. This
 // also allows pushing down computation into loading a column, hence
 // bypassing materialization into a vector.
+//
 // Unloaded LazyVectors should be referenced only by one top-level vector.
-// Otherwise, it runs the risk of being loaded for different set of rows by each
-// top-level vector.
+// Otherwise, it runs the risk of being loaded for different set of rows 
+// by each top-level vector.
 class LazyVector : public BaseVector {
  public:
   static constexpr const char* kCpuNanos = "dataSourceLazyCpuNanos";

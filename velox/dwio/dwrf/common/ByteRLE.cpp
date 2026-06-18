@@ -553,6 +553,7 @@ void BooleanRleDecoder::next(
 
   // Unpack data for nulls.
   if (numValues > nonNulls) {
+    // args: numSource, numTarget, source, mask, target
     bits::scatterBits(nonNulls, numValues, data, nulls, data);
   }
 

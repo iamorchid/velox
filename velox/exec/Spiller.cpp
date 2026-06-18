@@ -133,6 +133,7 @@ bool SpillerBase::fillSpillRuns(RowContainerIterator* iterator) {
       }
 
       totalRows += numRows;
+      // 见max_spill_run_rows配置说明, 默认值: 12UL << 20
       if (maxSpillRunRows_ > 0 && totalRows >= maxSpillRunRows_) {
         break;
       }
@@ -159,6 +160,7 @@ void SpillerBase::runSpill(bool lastRun) {
         memory::createAsyncMemoryReclaimTask<SpillStatus>(
             [partitionId = id, this]() { return writeSpill(partitionId); }));
     if ((writes.size() > 1) && executor_ != nullptr) {
+      // 第一个task, 将会被本线程执行write->move()时触发
       executor_->add([source = writes.back()]() { source->prepare(); });
     }
   }

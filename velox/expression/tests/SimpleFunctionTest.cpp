@@ -1288,6 +1288,7 @@ struct ConstantArgumentFunction {
   }
 };
 
+// [star][test] TEST_F(SimpleFunctionTest, constantArgument)
 TEST_F(SimpleFunctionTest, constantArgument) {
   registerFunction<
       ConstantArgumentFunction,
@@ -1350,6 +1351,14 @@ struct DecimalPlusTwoFunction {
   int8_t scale_;
 };
 
+//
+// function registry的组织形式:
+//   funcName -> Map<signature, Array<FunctionEntry{MetaData, FunctionFactory}>>
+//
+// 可以看到, 对于相同的function signature, 也可以对应多个不同的function实现.
+// 下面的DecimalPlusOneFunction注册两次, 就符合这种情况 (同ShortDecimal和ShortDecimal
+// 转成string形式的type有关, 这是为了和DecimalType转成string保持一致).
+//
 TEST_F(SimpleFunctionTest, decimals) {
   const auto& registry = exec::simpleFunctions();
 
@@ -1461,6 +1470,8 @@ TEST_F(SimpleFunctionTest, decimalsWithConstraints) {
   EXPECT_EQ("i1 + 1", it->second.constraint());
 
   {
+    // DECIMAL(10, 2)会自动根据presicion长度来选择ShortDecimalType或LongDecimalType.
+    // 很显然, 这里会自动选择ShortDecimalType (返回TypePtr).
     auto resolved =
         registry.resolveFunction("decimal_plus_two", {DECIMAL(10, 2)});
     ASSERT_TRUE(resolved.has_value());

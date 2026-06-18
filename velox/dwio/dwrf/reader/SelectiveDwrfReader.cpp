@@ -70,8 +70,10 @@ std::unique_ptr<SelectiveColumnReader> SelectiveDwrfReader::build(
       !isRoot || fileType->type()->kind() == TypeKind::ROW,
       "The root object can only be a row.");
 
+  // 确保请求类型和文件的中的数据类型是兼容的
   dwio::common::typeutils::checkTypeCompatibility(
       *fileType->type(), *requestedType);
+
   EncodingKey ek{fileType->id(), params.flatMapContext().sequence};
   auto& stripe = params.stripeStreams();
   switch (fileType->type()->kind()) {

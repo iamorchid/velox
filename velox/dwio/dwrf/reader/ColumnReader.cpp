@@ -151,6 +151,8 @@ void ColumnReader::readNulls(
     memcpy(nullsPtr, incomingNulls, numBytes);
     return;
   }
+  // TODO 这么默认设置为Not NULL, 是不是有问题?
+  // TODO notNullDecoder_应该采用BooleanRleDecoder 而非 ByteRleDecoder ??
   memset(nullsPtr, bits::kNotNullByte, numBytes);
   notNullDecoder_->next(
       reinterpret_cast<char*>(nullsPtr), numValues, incomingNulls);

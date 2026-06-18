@@ -283,7 +283,12 @@ void SelectiveListColumnReader::read(
   if (child_) {
     child_->seekTo(childTargetReadOffset_, false);
   }
+
+  // 如果offset_ < offset, prepareRead函数内部会自己进行seekTo操作, 即虽然
+  // 上面执行了child_->seekTo, 但如果上层parent列不是按照连续的offset来读取rows, 
+  // 则prepareRead执行过程还是会调整child的offset.
   prepareRead<char>(offset, rows, incomingNulls);
+
   auto activeRows = applyFilter(rows);
   nestedRowsAllSelected_ = activeRows.size() == rows.back() + 1 &&
       scanSpec_->maxArrayElementsCount() ==

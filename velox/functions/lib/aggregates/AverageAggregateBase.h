@@ -111,6 +111,10 @@ class AverageAggregateBase : public exec::Aggregate {
   void extractAccumulators(char** groups, int32_t numGroups, VectorPtr* result)
       override {
     auto rowVector = (*result)->as<RowVector>();
+
+    // 对于partial和final输出的不同场景, aggregateVector对应的输出schema
+    // 基本上是不一样的 (coordinator会自动根据不同的场景, 为聚合函数设置不同
+    // 的resultType类型).
     auto sumVector = rowVector->childAt(0)->asFlatVector<TAccumulator>();
     auto countVector = rowVector->childAt(1)->asFlatVector<int64_t>();
 
@@ -124,8 +128,11 @@ class AverageAggregateBase : public exec::Aggregate {
     for (auto i = 0; i < numGroups; ++i) {
       char* group = groups[i];
       if (isNull(group)) {
+        // 如果rawNulls为null, setNull操作会自动执行ensureNulls,
+        // 先为所有的null bits设置为不为null.
         rowVector->setNull(i, true);
       } else {
+        // rawNulls为null时, 也没有关系, 这个表示所有rows不为null
         clearNull(rawNulls, i);
         auto* sumCount = accumulator(group);
         rawCounts[i] = sumCount->count;
@@ -158,6 +165,7 @@ class AverageAggregateBase : public exec::Aggregate {
     } else if (!exec::Aggregate::numNulls_ && decodedRaw_.isIdentityMapping()) {
       auto data = decodedRaw_.data<TInput>();
       rows.applyToSelected([&](vector_size_t i) {
+        // 此时可以确定已有的groups的聚合结果都不为null
         updateNonNullValue<false>(groups[i], data[i]);
       });
     } else {

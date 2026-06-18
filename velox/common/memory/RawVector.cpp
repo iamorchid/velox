@@ -38,6 +38,8 @@ iota(int32_t size, raw_vector<int32_t>& storage, int32_t offset) {
     std::iota(storage.begin(), storage.end(), offset);
     return storage.data();
   }
+  // 直接复用全局的iotaData, 保证从返回的指针位置开始, 对应的int32_t
+  // 数值从offset一直递增.
   return iotaData.data() + offset;
 }
 

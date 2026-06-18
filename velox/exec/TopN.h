@@ -63,6 +63,7 @@ class TopN : public Operator {
   // RowContainer to generate the TopN's output.
   std::unique_ptr<RowContainer> data_;
   RowComparator comparator_;
+  // 按照自然排序时, std::priority_queue维护的是最大优先队列 (即top是最大值)
   std::priority_queue<char*, std::vector<char*>, RowComparator> topRows_;
   std::vector<char*> rows_;
 

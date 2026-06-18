@@ -46,6 +46,10 @@ bool SimpleFunctionRegistry::registerFunctionInternal(
     for (auto it = functions.begin(); it != functions.end(); ++it) {
       const auto& otherMetadata = (*it)->getMetadata();
 
+      // 什么情况下会存在func signature一样, 但physical type不一样?
+      // 对于ShortDecimal和LongDecimal来说, 当它们使用的type variable一样时,
+      // 对应的func signature也是一样的, 但采用的physicalType却不一样.
+      // 参考: TEST_F(SimpleFunctionTest, decimals)
       if (metadata->physicalSignatureEquals(otherMetadata)) {
         if (!overwrite) {
           return false;
@@ -204,6 +208,7 @@ SimpleFunctionRegistry::resolveFunction(
 
             // For variadic signatures, number of arguments in function call
             // may be one less than number of arguments in the signature.
+            // binder.tryBind()已经保证了参数满足variable arity的要求.
             const auto numArgsToMatch =
                 std::min(argTypes.size(), m.argPhysicalTypes().size());
 

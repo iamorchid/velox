@@ -258,16 +258,27 @@ void SelectiveStructColumnReaderBase::seekToRowGroupFixedRowsPerRowGroup(
     const int64_t index,
     const int32_t rowsPerRowGroup) {
   dwio::common::SelectiveStructColumnReaderBase::seekToRowGroup(index);
+  // TODO 但包含了nulls, 为何不能采用这个优化?
   if (isTopLevel_ && !formatData_->hasNulls()) {
     readOffset_ = index * rowsPerRowGroup;
     return;
   }
 
+  // 对于struct column而言, 当它存在nulls, 就会定义 PRESENT stream. 而只要存在
+  // stream, 就会为其生成对应的 ROW_INDEX stream (方便快速定位到对应row group的
+  // nulls所在位置).
   // There may be a nulls stream but no other streams for the struct.
   formatData_->seekToRowGroup(index);
+
+  //
+  // 对于 list/map column而言, 执行seekToRowGroup函数时, 会重置它们child的
+  // readOffset到特定的位置. 因此, 对于struct column而言, 这里需要先进行
+  // setReadOffsetRecursive, 然后再做 child->seekToRowGroup(...).
+  //
   // Set the read offset recursively. Do this before seeking the children
   // because list/map children will reset the offsets for their children.
   setReadOffsetRecursive(index * rowsPerRowGroup);
+
   for (auto& child : children_) {
     child->seekToRowGroup(index);
   }
@@ -279,9 +290,22 @@ void SelectiveStructColumnReaderBase::advanceFieldReaderFixedRowsPerRowGroup(
     dwio::common::SelectiveColumnReader* reader,
     const int64_t offset,
     const int32_t rowsPerRowGroup) {
+  //
+  // top-level column reader 并非指顶层struct下的字段, 具体含义参见 isTopLevel_ 
+  // 注释 以及 setIsTopLevel函数. 目前来看, 只有struct column (包括顶层或者嵌套) 
+  // 及其包含的字段column才有可能满足top-level属性. 
+  // 
+  // 如果当前字段满足top-level为true, 则它的所有祖先struct字段也一定满足这个. 反之,
+  // 则肯定存在一个祖先struct对应的rows包含了nulls.
+  //
+  // 如果reader->isTopLevel()为false, 则执行到那个包含了nulls的祖先struct时, 
+  // seekToRowGroup 调用到 seekToRowGroupFixedRowsPerRowGroup, 会自动为其下的
+  // 字段递归执行seekToRowGroup.
+  //
   if (!reader->isTopLevel()) {
     return;
   }
+
   const auto rowGroup = reader->readOffset() / rowsPerRowGroup;
   const auto nextRowGroup = offset / rowsPerRowGroup;
   if (nextRowGroup > rowGroup) {
@@ -317,7 +341,7 @@ void SelectiveStructColumnReaderBase::fillOutputRowsFromMutation(
 }
 
 void SelectiveStructColumnReaderBase::next(
-    uint64_t numValues,
+    uint64_t numValues /* rows to read */,
     VectorPtr& result,
     const Mutation* mutation) {
   mutation_ = mutation;
@@ -483,10 +507,16 @@ void SelectiveStructColumnReaderBase::read(
   // here.
   recordParentNullsInChildren(offset, rows);
 
+  // 如果当前struct column的scanSpec_ 以及 任何child column的ScanSpec定义了
+  // filter, 那么这里scanSpec_->hasFilter()将返回true.
   if (scanSpec_->hasFilter()) {
     setOutputRows(activeRows);
   }
+
   lazyVectorReadOffset_ = offset;
+
+  // 这里用的是 (rows.back() + 1) 而非 (activeRows.back() + 1),
+  // 即过滤掉的那些行, 显然不希望下次继续读取.
   readOffset_ = offset + rows.back() + 1;
 }
 
@@ -553,6 +583,7 @@ SelectiveStructColumnReaderBase::makeColumnLoader(vector_size_t index) {
       this, children_[index], numReads_);
 }
 
+// [star] 看看这边如何初始化LazyVector
 void SelectiveStructColumnReaderBase::getValues(
     const RowSet& rows,
     VectorPtr* result) {
@@ -605,6 +636,8 @@ void SelectiveStructColumnReaderBase::getValues(
   }
 
   setComplexNulls(rows, *result);
+
+  // 对于scanSpec_中没有覆盖到的字段, resultRow中的column vector将为nullptr
   for (const auto& childSpec : scanSpec_->children()) {
     if (!childSpec->keepValues()) {
       continue;

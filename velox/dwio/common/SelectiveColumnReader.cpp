@@ -103,6 +103,8 @@ void SelectiveColumnReader::seekTo(int64_t offset, bool readsNullsOnly) {
           offset,
           "Must not seek to before parentNullsRecordedTo_");
     }
+    // parent column 为nulls, child column 本身是不知道的. 因此, 上层
+    // 需要跳过特定的行数时, child需要知道parent中包含了多少个null.
     const auto distance = offset - readOffset_ - numParentNulls_;
     numParentNulls_ = 0;
     parentNullsRecordedTo_ = 0;
@@ -219,6 +221,7 @@ void SelectiveColumnReader::getIntValues(
     const RowSet& rows,
     const TypePtr& requestedType,
     VectorPtr* result) {
+  // valueSize_对应的是fileType_中的数据大小
   switch (requestedType->kind()) {
     case TypeKind::SMALLINT:
       switch (valueSize_) {

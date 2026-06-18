@@ -226,6 +226,11 @@ message Type {
   repeated StringPair attributes = 7;
 }
 
+// Each stripe contains only entire rows so that rows never straddle stripe 
+// boundaries. Stripes have three sections: a set of indexes for the rows 
+// within the stripe, the data itself, and a stripe footer. Both the indexes 
+// and the data sections are divided by columns so that only the data for 
+// the required columns needs to be read.
 message StripeInformation {
   // the global file offset of the start of the stripe
   optional uint64 offset = 1;
@@ -351,14 +356,23 @@ enum CalendarKind {
   PROLEPTIC_GREGORIAN = 2;
 }
 
+// The file is broken in to three parts- Header, Body, and Tail. The Header 
+// consists of the bytes “ORC’’ to support tools that want to scan the front 
+// of the file to determine the type of the file. The Body contains the rows 
+// and indexes, and the Tail gives the file level information as described 
+// in this section.
 message Footer {
+  // the length of the file header in bytes (always 3)
   optional uint64 headerLength = 1;
+  // the length of the file header and body in bytes
   optional uint64 contentLength = 2;
   repeated StripeInformation stripes = 3;
   repeated Type types = 4;
   repeated UserMetadataItem metadata = 5;
   optional uint64 numberOfRows = 6;
   repeated ColumnStatistics statistics = 7;
+
+  // the maximum number of rows in each index entry (10000)
   optional uint32 rowIndexStride = 8;
 
   // Each implementation that writes ORC files should register for a code
@@ -441,6 +455,10 @@ message PostScript {
   optional string magic = 8000;
 }
 
+//
+// 这部分内容不是orc文件本身的一部分, 而是orc文件的摘要信息, 是orc文件的reader需要了解的.
+// orc文件格式的解析, 参考: dwrf::ReaderBase::ReaderBase.
+//
 // The contents of the file tail that must be serialized.
 // This gets serialized as part of OrcSplit, also used by footer cache.
 message FileTail {

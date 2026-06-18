@@ -512,6 +512,8 @@ std::vector<column_index_t> toChannels(
 column_index_t exprToChannel(
     const core::ITypedExpr* expr,
     const TypePtr& type) {
+  // 下面的SQL也是支持的, (f3 - 10) 以及 (f4 + 10) 会放到source算子中计算.
+  // select f1, f2, avg(f3) over (partition by f1 order by f2 rows between f3 - 10 preceding and f4 + 10 following) from orders limit 10
   if (auto field = dynamic_cast<const core::FieldAccessTypedExpr*>(expr)) {
     return type->as<TypeKind::ROW>().getChildIdx(field->name());
   }
@@ -688,6 +690,7 @@ void Operator::MemoryReclaimer::enterArbitration() {
     return;
   }
 
+  // runningDriver值得是占据当前线程的driver
   Driver* const runningDriver = driverThreadCtx->driverCtx()->driver;
   if (!FLAGS_velox_memory_pool_capacity_transfer_across_tasks) {
     if (auto opDriver = ensureDriver()) {
@@ -703,8 +706,16 @@ void Operator::MemoryReclaimer::enterArbitration() {
           "The current running driver and the request driver must be from the same task");
     }
   }
-  if (runningDriver->task()->enterSuspended(runningDriver->state()) !=
-      StopReason::kNone) {
+
+  //
+  // 这里的逻辑其实就是将当前的driver假装处理为off thread (driver实际还是占据着
+  // 当前线程, 即on thread), 但因为当前thread在leaveArbitration之前, 实际上
+  // 不会再做op计算相关的操作 (因此, driver等同于off thread了), 只会做memory 
+  // arbitration. 之所以需要假装处理为off thread, 是因为走到task的memory
+  // claimer时, 要求所有driver threads都已经pause (即已经off thread).
+  //
+  auto stopReason = runningDriver->task()->enterSuspended(runningDriver->state());
+  if (stopReason != StopReason::kNone) {
     // There is no need for arbitration if the associated task has already
     // terminated.
     VELOX_FAIL("Terminate detected when entering suspension");
@@ -763,6 +774,9 @@ uint64_t Operator::MemoryReclaimer::reclaim(
       driver->state().suspended(),
       driver->state().isTerminated,
       pool->name());
+  
+  // Task::MemoryReclaimer::reclaim保证, 在执行后续pool的reclaim操作之前,
+  // task->pauseRequested()先完成.
   VELOX_CHECK(driver->task()->pauseRequested());
 
   TestValue::adjust(

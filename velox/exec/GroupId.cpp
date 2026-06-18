@@ -45,10 +45,13 @@ GroupId::GroupId(
   for (const auto& groupingSet : groupIdNode->groupingSets()) {
     std::vector<column_index_t> mappings(numGroupingKeys, kMissingGroupingKey);
     for (const auto& groupingKey : groupingSet) {
+      //
+      // GroupIdNode::GroupIdNode在构建outputType_时, 会将grouping keys的
+      // channel优先放入, 因此它们的channels总是从0开始.
+      //
       auto outputChannel = outputType_->getChildIdx(groupingKey);
-      VELOX_USER_CHECK_NE(
-          outputToInputGroupingKeyMapping.count(outputChannel),
-          0,
+      VELOX_USER_CHECK(
+          outputToInputGroupingKeyMapping.contains(outputChannel),
           "GroupIdNode didn't map grouping key {} to input channel",
           groupingKey);
       auto inputChannel = outputToInputGroupingKeyMapping.at(outputChannel);

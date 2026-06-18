@@ -93,6 +93,10 @@ FilterTypePtr ColumnSelector::buildNode(
   if (node.node == 0) {
     auto& rowType = type->asRow();
     for (size_t i = 0, size = type->size(); i < size; ++i) {
+      // 
+      // 这里的inData判断逻辑看起来比较奇怪, requestType看起来只会在contentType
+      // 的基础上新增字段, 为啥会有这种限定规则?
+      //
       bool inData = contentType && i < contentType->size();
       current->addChild(buildNode(
           FilterNode(nodes_.size(), i, rowType.nameOf(i), "", !inData),
@@ -107,7 +111,7 @@ FilterTypePtr ColumnSelector::buildNode(
       current->addChild(buildNode(
           FilterNode(
               nodes_.size(),
-              node.column,
+              node.column, // 对应顶层column的ordinal
               childName(type, i, node.name),
               "",
               !inData),

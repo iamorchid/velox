@@ -274,6 +274,8 @@ std::shared_ptr<MemoryPoolImpl> MemoryManager::createRootPool(
       std::move(reclaimer),
       options);
   VELOX_CHECK_EQ(pool->capacity(), 0);
+  // arbitrator_的实现通常为SharedArbitrator. 注意, 只有root pool创建
+  // 时, 只会添加到memory arbitrator中.
   pool->arbitrator()->addPool(pool);
   RECORD_HISTOGRAM_METRIC_VALUE(
       kMetricMemoryPoolInitialCapacityBytes, pool->capacity());

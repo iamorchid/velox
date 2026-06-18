@@ -122,6 +122,7 @@ bool isCompatible(TypeKind from, TypeKind to) {
   return from == to || compat.find(getKey(from, to)) != compat.end();
 }
 
+// from对应文件中数据的类型, 而to对应用户请求的类型
 template <typename T, typename FKind, typename FShouldRead>
 void checkTypeCompatibility(
     const Type& from,

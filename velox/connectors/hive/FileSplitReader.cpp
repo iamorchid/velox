@@ -334,6 +334,8 @@ void FileSplitReader::createReader(
 
 RowTypePtr FileSplitReader::getAdaptedRowType() const {
   auto& fileType = baseReader_->rowType();
+  // baseReaderOpts_.fileSchema()来自hiveTableHandle->dataColumns(), 即对应table schema.
+  // 而fileType则是基于orc footer中的type信息构建出来的.
   auto columnTypes = adaptColumns(fileType, baseReaderOpts_.fileSchema());
   auto columnNames = fileType->names();
   return ROW(std::move(columnNames), std::move(columnTypes));
@@ -428,6 +430,10 @@ std::vector<TypePtr> FileSplitReader::adaptColumns(
         VELOX_CHECK(tableSchema, "Unable to resolve column '{}'", fieldName);
         childSpec->setConstantValue(
             BaseVector::createNullConstant(
+                // [question] 
+                // 这里是不是应该判断下fieldName是否包含在readerOutputType_中, 如果
+                // 是的话, 应该采用outputType更合理? 因为对于FlatMapAsStruct的情况,
+                // table type可以是map, output type是struct(即velox的row类型).
                 tableSchema->findChild(fieldName),
                 1,
                 connectorQueryCtx_->memoryPool()));

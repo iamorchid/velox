@@ -33,6 +33,9 @@ endif()
 # Set the project name.
 project(velox)
 
+add_definitions(-DOPENSSL_NO_DEPRECATED_3_0)
+add_definitions(-DOPENSSL_SUPPRESS_DEPRECATED)
+
 # If we are in an active conda env disable search in system paths and add env to
 # prefix path
 if(DEFINED ENV{CONDA_PREFIX})

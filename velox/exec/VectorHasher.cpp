@@ -200,6 +200,8 @@ void VectorHasher::makeValueIdForOneRow(
     bool& success) {
   if constexpr (mayHaveNulls) {
     if (bits::isBitNull(nulls, row)) {
+      // 由最低阶的VectorHasher初始化为0, 其他VectorHasher不用
+      // 进行任何操作 (即保持null为0的语义即可).
       if (multiplier_ == 1) {
         result[row] = 0;
       }
@@ -208,6 +210,8 @@ void VectorHasher::makeValueIdForOneRow(
   }
   T value = values[valueRow];
   if (!success) {
+    // 之前计算valueId(value)时, 已经遇到了kUnmappable的情况,
+    // 后续所有新值只需要进行analyze即可 (计算新的value范围).
     analyzeValue(value);
     return;
   }
@@ -225,6 +229,8 @@ bool VectorHasher::makeValueIdsFlatNoNulls(
     const SelectivityVector& rows,
     uint64_t* result) {
   const auto* values = decoded_.data<T>();
+  // 对于StringView而言, tryMapToRange总是false. 但valueId函数中,
+  // StringView的实现模版支持isRange_为true是, 返回valueId.
   if (isRange_ && tryMapToRange(values, rows, result)) {
     return true;
   }
@@ -251,6 +257,7 @@ bool VectorHasher::makeValueIdsFlatWithNulls(
   return success;
 }
 
+// [star][HashTable] VectorHasher::makeValueIdsDecoded
 template <typename T, bool mayHaveNulls>
 bool VectorHasher::makeValueIdsDecoded(
     const SelectivityVector& rows,
@@ -848,7 +855,7 @@ uint64_t VectorHasher::enableValueIds(uint64_t multiplier, int32_t reservePct) {
   VELOX_CHECK_NE(
       typeKind_,
       TypeKind::BOOLEAN,
-      "A boolean VectorHasher should  always be by range");
+      "A boolean VectorHasher should always be by range");
   checkTypeSupportsValueIds();
 
   multiplier_ = multiplier;
@@ -868,6 +875,7 @@ uint64_t VectorHasher::enableValueRange(
 
   multiplier_ = multiplier;
   VELOX_CHECK_LE(0, reservePct);
+  // range必须先统计好(StringView的情况下, range不能overflow)
   VELOX_CHECK(hasRange_);
   extendRange(type_->kind(), reservePct, min_, max_);
   isRange_ = true;

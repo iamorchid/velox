@@ -40,6 +40,11 @@ WindowPartition::WindowPartition(
   for (auto index : inputMapping_) {
     columns_.emplace_back(data_->columnAt(index));
   }
+  // 上面的代码 等价于 (WindowBuild 对 Window 算子的input RowVector的column顺序进行了重组)
+  // for (size_t inputChannel = 0; inputChannel < inputMapping_.size(); ++inputChannel) {
+  //   auto rowContainerColumnPosition = inputMapping_[inputChannel];
+  //   columns_[inputChannel] = data_->columnAt(rowContainerColumnPosition);
+  // }
 }
 
 WindowPartition::WindowPartition(
@@ -104,7 +109,7 @@ vector_size_t WindowPartition::numRowsForProcessing(
 }
 
 void WindowPartition::extractColumn(
-    int32_t columnIndex,
+    int32_t columnIndex, // Window算子的inputChannel
     folly::Range<const vector_size_t*> rowNumbers,
     vector_size_t resultOffset,
     const VectorPtr& result) const {

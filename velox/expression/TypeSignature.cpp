@@ -33,6 +33,8 @@ std::string TypeSignature::toString() const {
     if (isHomogeneousRow()) {
       out << "(" << parameters_[0].toString() << ", ..." << ")";
     } else {
+      // [question]
+      // folly 怎么做到直接将TypeSignature作为string joi在一起的?
       out << "(" << folly::join(",", parameters_) << ")";
     }
   }

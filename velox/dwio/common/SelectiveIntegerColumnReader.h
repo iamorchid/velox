@@ -129,7 +129,7 @@ void SelectiveIntegerColumnReader::processFilter(
   if (filter == nullptr) {
     static_cast<Reader*>(this)
         ->template readHelper<Reader, velox::common::AlwaysTrue, isDense>(
-            &dwio::common::alwaysTrue(), rows, extractValues);
+            &dwio::common::alwaysTrue() /* filter */, rows, extractValues);
     return;
   }
 
@@ -263,7 +263,7 @@ void SelectiveIntegerColumnReader::readCommon(const RowSet& rows) {
       }
     } else {
       if (isDense) {
-        processFilter<Reader, true, kEncodingHasNulls>(
+        processFilter<Reader, true /* isDense */, kEncodingHasNulls>(
             filter, ExtractToReader(this), rows);
       } else {
         processFilter<Reader, false, kEncodingHasNulls>(

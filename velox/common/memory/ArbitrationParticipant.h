@@ -64,12 +64,17 @@ class ArbitrationTimedLock {
 class ArbitrationParticipant
     : public std::enable_shared_from_this<ArbitrationParticipant> {
  public:
+  //
+  // 下面的config在SharedArbitrator的构造函数中初始化
+  //
   struct Config {
     /// The initial capacity of a query memory pool.
-    uint64_t initCapacity;
+    uint64_t initCapacity; // [presto] kSharedArbitratorMemoryPoolInitialCapacity: 128MB
+                           // [velox]  kDefaultMemoryPoolInitialCapacity: 256MB
 
     /// The minimum capacity of a query memory pool.
-    uint64_t minCapacity;
+    uint64_t minCapacity;  // [presto] kSharedArbitratorMemoryPoolReservedCapacity: 64MB
+                           // [velox]  kDefaultMemoryPoolReservedCapacity: 0B
 
     /// When growing a query memory pool capacity, the growth bytes will be
     /// adjusted in the following way:
@@ -89,15 +94,16 @@ class ArbitrationParticipant
     /// NOTE: capacity growth adjust is only enabled if both
     /// 'fastExponentialGrowthCapacityLimit' and 'slowCapacityGrowRatio' are
     /// set, otherwise it is disabled.
-    uint64_t fastExponentialGrowthCapacityLimit;
-    double slowCapacityGrowRatio;
+    uint64_t fastExponentialGrowthCapacityLimit; // [presto] kSharedArbitratorFastExponentialGrowthCapacityLimit: 512MB
+                                                 // [velox]  kDefaultFastExponentialGrowthCapacityLimit: 512MB
+    double slowCapacityGrowRatio; // [presto] kSharedArbitratorSlowCapacityGrowPct: 0.25
+                                  // [velox]  kDefaultSlowCapacityGrowPct: 0.25
 
     /// When shrinking a memory pool capacity, the shrink bytes will be adjusted
     /// in a way such that AFTER shrink, the stricter (whichever is smaller) of
     /// the following conditions is met, in order to better fit the query memory
     /// pool's current memory usage:
-    /// - Free capacity is greater or equal to capacity *
-    /// 'minFreeCapacityRatio'
+    /// - Free capacity is greater or equal to capacity * 'minFreeCapacityRatio'
     /// - Free capacity is greater or equal to 'minFreeCapacity'
     ///
     /// NOTE: in the conditions when original requested shrink bytes ends up
@@ -106,8 +112,10 @@ class ArbitrationParticipant
     ///
     /// NOTE: capacity shrink adjustment is enabled when both
     /// 'minFreeCapacityRatio' and 'minFreeCapacity' are set.
-    uint64_t minFreeCapacity;
-    double minFreeCapacityRatio;
+    uint64_t minFreeCapacity; // [presto] kSharedArbitratorMemoryPoolMinFreeCapacity: 128MB
+                              // [velox]  kDefaultMemoryPoolMinFreeCapacity: 128MB
+    double minFreeCapacityRatio; // [presto] kSharedArbitratorMemoryPoolMinFreeCapacityPct: 0.25
+                                 // [velox]  kDefaultMemoryPoolMinFreeCapacityPct: 0.25
 
     /// Specifies the minimum bytes to reclaim from a participant at a time. The
     /// bigger of the specified bytes of 'minReclaimBytes' and 'minReclaimPct'
@@ -116,8 +124,10 @@ class ArbitrationParticipant
     /// threshold. This is to prevent inefficient memory reclaim operations on a
     /// participant with small reclaimable used capacity which could causes a
     /// large number of small spilled file on disk.
-    uint64_t minReclaimBytes;
-    double minReclaimPct;
+    uint64_t minReclaimBytes; // [presto] kSharedArbitratorMemoryPoolMinReclaimBytes: 128MB
+                              // [velox]  kDefaultMemoryPoolMinReclaimBytes: 128MB
+    double minReclaimPct; // [presto] (使用velox的默认值)
+                          // [velox]  kDefaultMemoryPoolMinReclaimPct: 0.25
 
     Config(
         uint64_t _initCapacity,

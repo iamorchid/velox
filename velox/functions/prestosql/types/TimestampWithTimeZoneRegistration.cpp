@@ -325,6 +325,7 @@ class TimestampWithTimeZoneCastOperator final : public exec::CastOperator {
     }
   }
 
+  // 将 input(类型为TimestampWithTimeZone) 转成 其他类型
   void castFrom(
       const BaseVector& input,
       exec::EvalCtx& context,

@@ -82,11 +82,15 @@ class AggregateWindowFunction : public exec::WindowFunction {
     // Accumulator offset must be aligned by their alignment size.
     singleGroupRowSize_ = bits::roundUp(
         singleGroupRowSize_, aggregate_->accumulatorAlignmentSize());
+    // 这里的布局(flags, varRowSize, accumulator)不一定需要RowContainer的
+    // row布局(flags, accumulators, varRowSize, ...)一样, 只需要布局信息被
+    // aggregate正确解析即可.
     aggregate_->setOffsets(
         singleGroupRowSize_,
         exec::RowContainer::nullByte(kAccumulatorFlagsOffset),
         exec::RowContainer::nullMask(kAccumulatorFlagsOffset),
         exec::RowContainer::initializedByte(kAccumulatorFlagsOffset),
+        // initializedMask(...) 和 (nullMask(...) << 1) 等价
         exec::RowContainer::initializedMask(kAccumulatorFlagsOffset),
         /* needed for out of line allocations */ kRowSizeOffset);
     singleGroupRowSize_ += aggregate_->accumulatorFixedWidthSize();
@@ -341,6 +345,7 @@ class AggregateWindowFunction : public exec::WindowFunction {
       aggregateInitialized_ = true;
 
       auto frameStartIndex = frameStartsVector[i] - minFrame;
+      // frameEndsVector[i]为inclusive, frameEndIndex为exclusive
       auto frameEndIndex = frameEndsVector[i] - minFrame + 1;
       computeAggregate(rows, frameStartIndex, frameEndIndex);
       result->copy(aggregateResultVector_.get(), resultOffset + i, 0, 1);

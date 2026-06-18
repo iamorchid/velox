@@ -32,6 +32,10 @@ const std::shared_ptr<const T>& singletonUdfMetadata(
   return instance;
 }
 
+///
+/// 这里的名称很难理解, Function对应的其实是FunctionFactory(即基于SimpleFunction
+/// 创建VectorFunction), 而FunctionFactory对应的应该是FunctionFactoryProvider.
+///
 using Function = SimpleFunctionAdapterFactory;
 using Metadata = core::ISimpleFunctionMetadata;
 using FunctionFactory = std::function<std::unique_ptr<Function>()>;
@@ -46,6 +50,7 @@ struct FunctionEntry {
     return *metadata_;
   }
 
+  /// ExprCompiler会用到这个方法来创建VectorFunction
   std::unique_ptr<Function> createFunction() const {
     return factory_();
   }
@@ -76,6 +81,9 @@ class SimpleFunctionRegistry {
       bool overwrite) {
     const auto& metadata = singletonUdfMetadata<typename UDF::Metadata>(
         UDF::is_default_null_behavior, constraints);
+
+    // UDF 对应的是 SimpleFunctionAdapterFactoryImpl<UDFHolder>, 下面的
+    // factory命名为factoryProvider更合适.
     const auto factory = []() { return std::make_unique<UDF>(); };
 
     if (aliases.empty()) {

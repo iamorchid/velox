@@ -1,0 +1,18 @@
+{
+  "version": 4,
+  "configurations": [
+    {
+      "name": "Linux",
+      "compileCommands": "${workspaceFolder}/_build/release/compile_commands.json",
+      "compilerPath": "/apsarapangu/SSDCache1/admin/downloads/llvm-21/LLVM-21.1.8-Linux-X64/bin/clang++",
+      "cppStandard": "c++20",
+      "intelliSenseMode": "linux-clang-x64",
+      "includePath": [
+        "${workspaceFolder}",
+        "${workspaceFolder}/velox",
+        "${workspaceFolder}/_build/release",
+        "${workspaceFolder}/_build/release/_deps/**"
+      ]
+    }
+  ]
+}

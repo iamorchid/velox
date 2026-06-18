@@ -377,6 +377,10 @@ class SimpleVector : public BaseVector {
           typeid(typename TypeTraits<Kind>::NativeType).name(),
           typeid(T).name());
     } else {
+      // 我们可以扩展任意的Type类型, 但使用TypeKind却必须是velox内置定义好的.
+      // TypeKind和存储结构有关, 而Type类型(包括继承类)则描述业务逻辑属性.
+      // 比如, VarcharType类型 (表示字符串) 可以使用TypeKind::VARCHAR,
+      // JsonType 也可以使用TypeKind::VARCHAR.
       return static_cast<const CanProvideCustomComparisonType<Kind>*>(type)
           ->compare(left, right);
     }

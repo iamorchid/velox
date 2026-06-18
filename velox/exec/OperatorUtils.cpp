@@ -539,12 +539,21 @@ void projectChildren(
     maxInputChannel = std::max<int>(maxInputChannel, inputChannel);
     maxOutputChannel = std::max<int>(maxOutputChannel, outputChannel);
   }
+
+  //
+  // 这里允许同一个inputChannel映射到多个不同的outputChannel, 因此
+  // wrappedChildren是为了缓存已经inputChannel的wrapChild结果.
+  //
   // Cache for already wrapped children to avoid wrapping the same child
   // multiple times.
   std::vector<VectorPtr> wrappedChildren(1 + maxInputChannel);
+
+  // 由Operator::fillOutput可以知道, 同一个projectedChildren可以调用
+  // 函数projectChildren多次. 不通调用下, maxOutputChannel肯定不同.
   if (1 + maxOutputChannel > projectedChildren.size()) {
     projectedChildren.resize(1 + maxOutputChannel);
   }
+
   for (auto [inputChannel, outputChannel] : projections) {
     auto& wrapped = wrappedChildren[inputChannel];
     if (!wrapped) {

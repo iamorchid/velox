@@ -78,10 +78,21 @@ std::unique_ptr<TypeWithId> TypeWithId::create(
   uint32_t next = 1;
   std::vector<std::unique_ptr<TypeWithId>> children(type->size());
   for (int i = 0, size = type->size(); i < size; ++i) {
+    //
+    // type对应底层文件数据本身的schema, spec包含了上层需要读取那些列的信息.
+    // 比如type为{f1:int,f2:{f2_1:int,f2_2:bigint},f3:{f3_1:int,f3_2:{f3_2_1:int,f3_2_2:varchar}}}, 
+    // spec为{f2.f2_1, f3.f3_2.f3_2_1}, 则这里可以直接跳过f1, 但f2和f3还是会加载完整child定义, 而不仅仅是
+    // spec中定义的child. 因为只有加载完整定义, 才能确定spec中请求字段的column ID (根据orc type介绍可以知道, 
+    // column ID是按照前序遍历顺序递增的).
+    //
+    // 另外, 加载orc中的column stream数据时, 则会按照spec的具体要求加载, 具体可以参考:
+    // SelectiveStructColumnReader::SelectiveStructColumnReader(...)
+    //
     auto* childSpec = spec.childByName(type->nameOf(i));
     if (childSpec && !childSpec->isConstant()) {
       children[i] = create(type->childAt(i), next, i);
     } else {
+      // next对应的就是type定义中, 下一个column的node ID.
       next += countNodes(type->childAt(i));
     }
   }
@@ -103,6 +114,7 @@ std::unique_ptr<TypeWithId> TypeWithId::create(
     uint32_t& next,
     uint32_t column) {
   DWIO_ENSURE_NOT_NULL(type);
+  // TypeWithId的id信息基于前序遍历生成
   const uint32_t myId = next++;
   std::vector<std::unique_ptr<TypeWithId>> children;
   children.reserve(type->size());
@@ -111,9 +123,12 @@ std::unique_ptr<TypeWithId> TypeWithId::create(
     children.emplace_back(create(
         child,
         next,
+        // 和ColumnSelector::buildNode类似, 即对于非top-level的column, 
+        // 这里的column ordinal保持和所在的top column的ordinal一致.
         (myId == 0 && type->kind() == TypeKind::ROW) ? offset++ : column));
   }
   const uint32_t maxId = next - 1;
+  // 这里的构造函数中, 会为children初始化好parent_
   return std::make_unique<TypeWithId>(
       type, std::move(children), myId, maxId, column);
 }

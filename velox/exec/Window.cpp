@@ -196,7 +196,7 @@ Window::WindowFrame Window::createWindowFrame(
   auto startFrameArg = createFrameChannelArg(frame.startValue);
   auto endFrameArg = createFrameChannelArg(frame.endValue);
   return WindowFrame(
-      {frame.type,
+      {frame.type, // kRange or kRows
        frame.startType,
        frame.endType,
        std::move(startFrameArg),
@@ -318,6 +318,8 @@ void Window::createPeerAndFrameBuffers() {
 
 void Window::noMoreInput() {
   Operator::noMoreInput();
+
+  // 对收集的结果进行排序并切分partitions
   windowBuild_->noMoreInput();
 }
 
@@ -379,7 +381,7 @@ void updateKRowsOffsetsColumn(
 void Window::updateKRowsFrameBounds(
     bool isKPreceding,
     const FrameChannelArg& frameArg,
-    vector_size_t startRow,
+    vector_size_t startRow, // == partitionOffset_
     vector_size_t numRows,
     vector_size_t* rawFrameBounds) {
   if (frameArg.index == kConstantChannel) {
@@ -410,6 +412,8 @@ void Window::updateKRowsFrameBounds(
     if (startValue > static_cast<int64_t>(INT32_MAX)) {
       overflowStart = 0;
     } else {
+      // 从 overflowStart 开始, 加上 startValue 等于 INT32_MAX + 1,
+      // 此时显然已经溢出了 (超出了 vector_size_t 的最大表示范围).
       overflowStart = INT32_MAX - startValue + 1;
     }
     if (overflowStart >= 0 && overflowStart < numRows) {
@@ -422,6 +426,9 @@ void Window::updateKRowsFrameBounds(
     }
     std::iota(rawFrameBounds, rawFrameBounds + numRows, startValue);
   } else {
+    // [question]
+    // 虽然从代码调用上来看, startRow 总是由 partitionOffset_ 传入, 但从逻辑上讲,
+    // 下面的partitionOffset_替换为 startRow 更为合理.
     currentPartition_->extractColumn(
         frameArg.index, partitionOffset_, numRows, 0, frameArg.value);
     if (frameArg.value->typeKind() == TypeKind::INTEGER) {
@@ -437,7 +444,7 @@ void Window::updateKRowsFrameBounds(
 void Window::updateFrameBounds(
     const WindowFrame& windowFrame,
     const bool isStartBound,
-    const vector_size_t startRow,
+    const vector_size_t startRow, // == partitionOffset_
     const vector_size_t numRows,
     const vector_size_t* rawPeerStarts,
     const vector_size_t* rawPeerEnds,
@@ -459,6 +466,7 @@ void Window::updateFrameBounds(
       break;
     case core::WindowNode::BoundType::kCurrentRow: {
       if (windowType == core::WindowNode::WindowType::kRange) {
+        // rawPeerBuffer保存了当前各个待计算行对应的peer位置
         std::copy(rawPeerBuffer, rawPeerBuffer + numRows, rawFrameBounds);
       } else {
         // Fills the frameBound buffer with increasing value of row indices
@@ -473,6 +481,11 @@ void Window::updateFrameBounds(
         updateKRowsFrameBounds(
             true, frameArg.value(), startRow, numRows, rawFrameBounds);
       } else {
+        // 对于下面的SQL, 老版本presto不支持 (仅支持unbounded). 对于新版本, Window算子的
+        // source算子会将 (f2 - expr1) 以及 (f2 + expr2) 都计算好, 而Window算子则通过
+        // FrameChannelArg的index进行引用 (即作为input channel). 对于range类型的window, 
+        // FrameChannelArg的constant总是不会定义.
+        // select f1, f2, avg(f3) over (partition by f1 order by f2 range expr1 preceding and expr2 following)
         currentPartition_->computeKRangeFrameBounds(
             isStartBound,
             true,
@@ -525,7 +538,7 @@ void computeValidFrames(
       continue;
     }
     const vector_size_t frameStart = rawFrameStarts[i];
-    const vector_size_t frameEnd = rawFrameEnds[i];
+    const vector_size_t frameEnd = rawFrameEnds[i]; // inclusive
     // All valid frames require frameStart <= frameEnd to define the frame rows.
     // Also, frameEnd >= 0, so that the frameEnd doesn't fall before the
     // partition. And frameStart <= lastRow so that the frameStart doesn't fall
@@ -542,13 +555,16 @@ void computeValidFrames(
 } // namespace
 
 void Window::computePeerAndFrameBuffers(
-    vector_size_t startRow,
+    vector_size_t startRow, // == partitionOffset_
     vector_size_t endRow) {
   const vector_size_t numRows = endRow - startRow;
   const vector_size_t numFuncs = windowFunctions_.size();
 
   // Size buffers for the call to WindowFunction::apply.
   const auto bufferSize = numRows * sizeof(vector_size_t);
+
+  // 每个window function都有各自的frame定义, 但对于同一个Window算子中的多个窗口函数,
+  // 它们的partition以及order by定义都是相同的, 因此计算的peer信息可以共享.
   peerStartBuffer_->setSize(bufferSize);
   peerEndBuffer_->setSize(bufferSize);
   auto* rawPeerStarts = peerStartBuffer_->asMutable<vector_size_t>();
@@ -624,7 +640,7 @@ void Window::getInputColumns(
 }
 
 void Window::callApplyForPartitionRows(
-    vector_size_t startRow,
+    vector_size_t startRow, // == partitionOffset_
     vector_size_t endRow,
     vector_size_t resultOffset,
     const RowVectorPtr& result) {

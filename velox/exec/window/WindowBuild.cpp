@@ -42,7 +42,9 @@ reorderInputChannels(
   auto appendChannel =
       [&inputType, &channels, &inversedChannels, &names, &types](
           column_index_t channel) {
+        // RowContainer中column position => window input channel
         channels.push_back(channel);
+        // window input channel => RowContainer中column position
         inversedChannels[channel] = channels.size() - 1;
         names.push_back(inputType->nameOf(channel));
         types.push_back(inputType->childAt(channel));

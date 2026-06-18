@@ -69,7 +69,7 @@ lifetime of the Task. Furthermore, Driver holds an exclusive ownership of the
 operators. Therefore, the lifetime of an operator cannot exceed the lifetime of
 the Driver. To summarize, Task outlives both Drivers and Operators.
 
-BlockedState struct also has a reference to Driver. This structure is created
+BlockingState struct also has a reference to Driver. This structure is created
 when a Driver is blocked and is stored in a lambda attached to a blocking
 future. It gets destroyed only after the future is complete and the completion
 callback has finished executing. See BlockingState::setResume. If the future

@@ -276,7 +276,7 @@ class FilterType {
   const FilterNode node_;
   const std::weak_ptr<FilterType> parent_;
   std::vector<FilterTypePtr> children_;
-  // a flat to decide if current node is needed
+  // a flag to decide if current node is needed
   bool read_;
   // a flag to indicate if current node is in content
   bool inContent_;

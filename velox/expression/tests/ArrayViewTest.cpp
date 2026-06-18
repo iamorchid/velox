@@ -36,6 +36,7 @@ DecodedVector* decode(DecodedVector& decoder, const BaseVector& vector) {
   return &decoder;
 }
 
+// [star][test] ArrayViewTest
 template <bool returnsOptionalValues>
 class ArrayViewTest : public functions::test::FunctionBaseTest {
   template <typename T>

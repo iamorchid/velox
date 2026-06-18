@@ -38,6 +38,7 @@ class SelectiveIntegerDirectColumnReader
             params,
             scanSpec,
             std::move(fileType)) {
+    // fileType_->id()对应的是orc type tree中node ID, 即column的ID.
     const EncodingKey encodingKey{
         fileType_->id(), params.flatMapContext().sequence};
     const auto& stripe = params.stripeStreams();

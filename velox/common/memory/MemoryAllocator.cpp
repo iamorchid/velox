@@ -200,6 +200,7 @@ bool MemoryAllocator::allocateNonContiguous(
     return true;
   }
 
+  // 生成内存分配计划
   const SizeMix mix = allocationSize(numPages, minSizeClass);
   if (reservationCB != nullptr) {
     if (mix.totalPages >= numPagesToFree) {

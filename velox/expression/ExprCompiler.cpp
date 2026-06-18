@@ -535,6 +535,7 @@ std::unordered_set<std::string> collectFlatteningCandidates(
 }
 } // namespace
 
+// [star][expr] compileExpressions
 std::vector<std::shared_ptr<Expr>> compileExpressions(
     const std::vector<TypedExprPtr>& sources,
     core::ExecCtx* execCtx,

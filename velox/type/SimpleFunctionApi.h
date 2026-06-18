@@ -44,6 +44,7 @@ using T6 = TypeVariable<6>;
 using T7 = TypeVariable<7>;
 using T8 = TypeVariable<8>;
 
+// 这里的id仅仅是为了template具现实例, 无其他含义
 template <size_t id>
 struct IntegerVariable {
   static size_t getId() {

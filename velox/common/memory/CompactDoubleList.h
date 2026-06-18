@@ -23,7 +23,7 @@ namespace facebook::velox {
 
 /// Circular double linked list with 6 byte pointers. Used for free list in
 /// HashStringAllocator so that we get a minimum allocation payload size of 16
-/// bytes. (12 bits for the links, 4 for trailer).
+/// bytes. (12 bytes for the links, 4 for trailer).
 ///
 /// NOTE: this class is not thread-safe.
 class CompactDoubleList {

@@ -1134,6 +1134,11 @@ class AggregationNode : public PlanNode {
     /// A list of sorting orders that goes together with 'sortingKeys'.
     std::vector<SortOrder> sortingOrders{};
 
+    ///
+    /// 对于presto而言, 虽然优化器会将distinct处理为MarkDistinct (聚合函数通过mask
+    /// 引用对应的输出). 但velox原生支持distinct聚合, 即下面distinct表达的语义.
+    /// select project, count(distinct logstore) from table group by project
+    ///
     /// Boolean indicating whether inputs must be de-duplicated before
     /// aggregating.
     bool distinct{false};

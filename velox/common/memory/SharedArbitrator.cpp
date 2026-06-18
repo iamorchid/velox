@@ -511,10 +511,21 @@ void SharedArbitrator::addPool(const std::shared_ptr<MemoryPool>& pool) {
     participants_.emplace(newParticipant->name(), newParticipant);
   }
 
+  // ArbitrationParticipant持有pool的weak_ptr, 这里lock()是将weak_ptr
+  // 转成shared_ptr (此时显然一定能转成功).
   auto scopedParticipant = newParticipant->lock().value();
   std::vector<ContinuePromise> arbitrationWaiters;
   {
     std::lock_guard<std::mutex> l(stateMutex_);
+    //
+    // scopedParticipant的minCapacity和initCapacity都是从participantConfig_而来,
+    // PrestoServer::initializeVeloxMemor初始化的默认值分别为: 64M和128M. 而maxCapacity
+    // 对应的是query能使用的最大内存(配置kQueryMaxMemoryPerNode, 默认4GB). 
+    //
+    // 其中, 预留freeReservedCapacity_的目的, 就是为了尽可能保证每个query都能分配到
+    // minCapacity的内存空间(参见kReservedCapacity说明). PrestoServer通过配置参数
+    // kSharedArbitratorReservedCapacity默认配置的reserved capacity大小为4G.
+    //
     const uint64_t minBytesToReserve = std::min(
         scopedParticipant->maxCapacity(), scopedParticipant->minCapacity());
     const uint64_t maxBytesToReserve = std::max(
@@ -558,8 +569,10 @@ std::vector<ArbitrationCandidate> SharedArbitrator::getCandidates(
   std::vector<ArbitrationCandidate> candidates;
   std::shared_lock guard{participantLock_};
   candidates.reserve(participants_.size());
-  for (const auto& entry : participants_) {
-    auto candidate = entry.second->lock();
+  for (const auto& [name, participant] : participants_) {
+    // memory pool在析构过程的时候, 才会执行 SharedArbitrator::removePool.
+    // 因此, 存在participant的memory pool已经不可用的情况.
+    auto candidate = participant->lock();
     if (!candidate.has_value()) {
       continue;
     }
@@ -772,6 +785,7 @@ uint64_t SharedArbitrator::allocateCapacity(
       participantId, requestBytes, maxAllocateBytes, minAllocateBytes);
 }
 
+// minAllocateBytes可以理解为: 总应该优先满足的分配量
 uint64_t SharedArbitrator::allocateCapacityLocked(
     uint64_t participantId,
     uint64_t requestBytes,
@@ -780,6 +794,13 @@ uint64_t SharedArbitrator::allocateCapacityLocked(
   VELOX_CHECK_LE(requestBytes, maxAllocateBytes);
 
   if (FOLLY_UNLIKELY(!globalArbitrationWaiters_.empty())) {
+    //
+    // participantId越小, 表示participant的age越大 (即先创建出来). arbitrator
+    // 的服务宗旨是: 优先为最老的participant服务. 因此, 如果当前participant不比
+    // 当前等待者更老 (除非他的capacity还没有达到minCapacity, arbitator会有优先
+    // 保证每个participant尽量获得minCapacity), 则当前partitipant不允许从全局
+    // capacity中窃取可用capacity, 必须入队按序等待arbitration.
+    //
     if ((participantId > globalArbitrationWaiters_.begin()->first) &&
         (requestBytes > minAllocateBytes)) {
       return 0;
@@ -787,6 +808,7 @@ uint64_t SharedArbitrator::allocateCapacityLocked(
     maxAllocateBytes = std::max(requestBytes, minAllocateBytes);
   }
 
+  // getGrowTargets保证了: requestBytes <= maxGrowBytes
   const uint64_t nonReservedBytes =
       std::min<uint64_t>(freeNonReservedCapacity_, maxAllocateBytes);
   if (nonReservedBytes >= maxAllocateBytes) {
@@ -794,12 +816,16 @@ uint64_t SharedArbitrator::allocateCapacityLocked(
     return nonReservedBytes;
   }
 
+  // 尝试按照minAllocateBytes的大小来分配capacity, freeReservedCapacity_是为了
+  // 保证每个query都尽可能分配到config_->minCapacity的空间 (见getGrowTargets).
   uint64_t reservedBytes{0};
   if (nonReservedBytes < minAllocateBytes) {
     const uint64_t freeReservedCapacity = freeReservedCapacity_;
     reservedBytes =
         std::min(minAllocateBytes - nonReservedBytes, freeReservedCapacity);
   }
+
+  // 走到这里说明: freeReservedCapacity_非常低 或者 minAllocateBytes < requestBytes
   if (FOLLY_UNLIKELY(nonReservedBytes + reservedBytes < requestBytes)) {
     return 0;
   }
@@ -894,8 +920,13 @@ void SharedArbitrator::growCapacity(ArbitrationOperation& op) {
   checkIfAborted(op);
   checkIfTimeout(op);
 
+  // 尝试在memory pool的capacity_不改变的情况下, 根据requestBytes来增加reservationBytes_.
+  // 如果能保证更新后的reservationBytes_ <= capacity_, 则返回true.
   RETURN_IF_TRUE(maybeGrowFromSelf(op));
 
+  // ensureCapacity会检查query请求的总capacity是否超过了query级别以及node本身的限制. 
+  // 如果是, 对当前query的memory pool执行shrink和reclaim操作. 如果执行这些操作后, 还
+  // 是超过限制, 则返回false (表示growCapacity失败).
   if (!ensureCapacity(op)) {
     const auto maxCapacity = op.participant()->maxCapacity();
     MEM_POOL_CAP_EXCEEDED(
@@ -913,12 +944,17 @@ void SharedArbitrator::growCapacity(ArbitrationOperation& op) {
 
   checkIfAborted(op);
 
+  // 再次check
   RETURN_IF_TRUE(maybeGrowFromSelf(op));
 
   op.setGrowTargets();
+
+  // 检查当前node是不是还有足够多的free capacity以满足当前的请求
   RETURN_IF_TRUE(growWithFreeCapacity(op));
 
+  // 从其他请求关联的memory pool中释放出free的capacity (即进行pool的shrink操作)
   reclaimUnusedCapacity();
+
   RETURN_IF_TRUE(growWithFreeCapacity(op));
 
   if (!globalArbitrationEnabled_) {
@@ -944,7 +980,11 @@ void SharedArbitrator::growCapacity(ArbitrationOperation& op) {
         op.timeoutNs(),
         /*localArbitration=*/true);
     checkIfAborted(op);
+
+    // 寄希望于自己reclaim了足够的内存
     RETURN_IF_TRUE(maybeGrowFromSelf(op));
+
+    // 寄希望于自己reclaim期间, 其他pool释放出了内存
     if (!growWithFreeCapacity(op)) {
       LOCAL_MEM_ARBITRATION_FAILED(
           fmt::format(
@@ -956,6 +996,8 @@ void SharedArbitrator::growCapacity(ArbitrationOperation& op) {
     }
     return;
   }
+
+  // 尝试通过reclaim其他query的memory pool来获得足够的内存
   startAndWaitGlobalArbitration(op);
 }
 
@@ -964,6 +1006,7 @@ void SharedArbitrator::startAndWaitGlobalArbitration(ArbitrationOperation& op) {
   checkIfTimeout(op);
 
   std::unique_ptr<ArbitrationWait> arbitrationWait;
+  // Creates an invalid SemiFuture with no shared state, namely valid() is false
   ContinueFuture arbitrationWaitFuture{ContinueFuture::makeEmpty()};
   uint64_t allocatedBytes{0};
   {
@@ -1112,6 +1155,9 @@ void SharedArbitrator::runGlobalArbitration() {
             allParticipantsReclaimed);
       }
       totalReclaimedBytes += reclaimedBytes;
+
+      // 如果释放出的capacity足够多, 这里会从globalArbitrationWaiters_中移除已经满足
+      // requestBytes请求大小的waiter.
       reclaimUnusedCapacity();
     }
 
@@ -1166,6 +1212,7 @@ bool SharedArbitrator::growWithFreeCapacity(ArbitrationOperation& op) {
       op.minGrowBytes());
   if (allocatedBytes > 0) {
     VELOX_CHECK_GE(allocatedBytes, op.requestBytes());
+    // 增加相应memory pool的capacity_大小以及reservationBytes_大小
     CHECKED_GROW(op.participant(), allocatedBytes, op.requestBytes());
     return true;
   }
@@ -1180,6 +1227,9 @@ std::optional<ScopedArbitrationParticipant> SharedArbitrator::getParticipant(
   return it->second->lock();
 }
 
+// 如果增加requestBytes后, memory pool使用的capacity不会超过单个query的maxCapaicity
+// 的限制 且 不会超过node级别的arbitrator capacity_的限制, 则返回true. 默认情况下, 
+// arbitrator capacity_会远远大于query的maxCapaicity.
 bool SharedArbitrator::checkCapacityGrowth(ArbitrationOperation& op) const {
   if (!op.participant()->checkCapacityGrowth(op.requestBytes())) {
     return false;
@@ -1195,21 +1245,27 @@ bool SharedArbitrator::ensureCapacity(ArbitrationOperation& op) {
 
   RETURN_TRUE_IF_TRUE(checkCapacityGrowth(op));
 
+  // 释放memory pool中没有被reserved capcity空间, pool->capacity_缩减以下大小: 
+  // pool->capacity_ - pool->reservationBytes_
   shrink(op.participant(), /*reclaimAll=*/true);
 
   RETURN_TRUE_IF_TRUE(checkCapacityGrowth(op));
 
+  // reclaim memory pool中被reserved的内存空间 (其中部分空间可能已经分配内存), 
+  // memory pool的capacity_不会变化, reservationBytes_可能会减小.
   reclaim(
       op.participant(),
       op.requestBytes(),
       op.timeoutNs(),
       /*localArbitration=*/true);
+
   // Checks if the requestor has been aborted in reclaim above.
   checkIfAborted(op);
 
   RETURN_TRUE_IF_TRUE(checkCapacityGrowth(op));
 
   shrink(op.participant(), /*reclaimAll=*/true);
+  
   return checkCapacityGrowth(op);
 }
 
@@ -1234,7 +1290,7 @@ uint64_t SharedArbitrator::reclaimUnusedCapacity() {
       getCandidates(/*freeCapacityOnly=*/true);
   uint64_t reclaimedBytes{0};
   SCOPE_EXIT {
-    freeCapacity(reclaimedBytes);
+    freeCapacity(reclaimedBytes); // 保证异常安全
   };
   for (const auto& candidate : candidates) {
     if (candidate.reclaimableFreeCapacity == 0) {
@@ -1281,9 +1337,8 @@ uint64_t SharedArbitrator::reclaimUsedMemoryBySpill(
           participantConfig_.minReclaimBytes) {
         continue;
       }
-      if (failedParticipants.count(candidate.participant->id()) != 0) {
-        VELOX_CHECK_EQ(
-            reclaimedParticipants.count(candidate.participant->id()), 1);
+      if (failedParticipants.contains(candidate.participant->id())) {
+        VELOX_CHECK(reclaimedParticipants.contains(candidate.participant->id()));
         continue;
       }
       if (bytesToReclaim >= targetBytes) {
@@ -1396,6 +1451,8 @@ uint64_t SharedArbitrator::reclaim(
   MemoryReclaimer::Stats stats;
   {
     NanosecondTimer reclaimTimer(&reclaimTimeNs);
+
+    // reclaimedBytes 对应memory pool的capacity缩减量
     reclaimedBytes = participant->reclaim(targetBytes, timeoutNs, stats);
   }
   // NOTE: if memory reclaim fails, then the participant is also aborted. If

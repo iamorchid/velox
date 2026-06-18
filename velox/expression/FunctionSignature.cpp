@@ -172,6 +172,8 @@ void validate(
         "Variable arity requires at least one argument");
   }
 
+  // type variables需要基于input arg的类型进行提前推断出来, 如果允许return类型
+  // 使用arg类型中没有涉及的type variable, 则这个type variable无法推导出来.
   // All type variables should apear in the inputs arguments.
   for (auto& [name, variable] : variables) {
     if (variable.isTypeParameter()) {
@@ -184,6 +186,8 @@ void validate(
   validateBaseTypeAndCollectTypeParams(
       variables, returnType, usedVariables, true);
 
+  // 上面已经保证了所有的type variable都都在usedVariables中了, 下面的不一致只可
+  // 能由integer variable导致的.
   VELOX_USER_CHECK_EQ(
       usedVariables.size(),
       variables.size(),

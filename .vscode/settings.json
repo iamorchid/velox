@@ -1,0 +1,30 @@
+{
+  "clangd.path": "/apsarapangu/SSDCache1/admin/downloads/llvm-21/LLVM-21.1.8-Linux-X64/bin/clangd",
+  "clangd.arguments": [
+    "--compile-commands-dir=${workspaceFolder}/_build/release",
+    "--background-index",
+    "--clang-tidy",
+    "--completion-style=detailed",
+    "--header-insertion=never",
+    "--query-driver=/apsarapangu/SSDCache1/admin/downloads/llvm-21/LLVM-21.1.8-Linux-X64/bin/clang++,/usr/bin/clang++,/usr/bin/g++"
+  ],
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/_build/release/compile_commands.json",
+  "C_Cpp.default.compilerPath": "/apsarapangu/SSDCache1/admin/downloads/llvm-21/LLVM-21.1.8-Linux-X64/bin/clang++",
+  "cmake.buildDirectory": "${workspaceFolder}/_build/release",
+  "cmake.configureSettings": {
+    "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+  },
+  "files.associations": {
+    "*.h": "cpp",
+    "*.hpp": "cpp",
+    "*.hh": "cpp",
+    "*.inc": "cpp"
+  },
+  "search.exclude": {
+    "**/_build": true,
+    "**/.git": true
+  },
+  "files.watcherExclude": {
+    "**/_build/**": true
+  }
+}

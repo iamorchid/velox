@@ -266,6 +266,7 @@ class RleDecoderV1 : public dwio::common::IntDecoder<isSigned> {
       return;
     }
 
+    // current对应的是需要读取的行号(即row)
     int32_t current = visitor.start();
     this->template skip<hasNulls>(current, 0, nulls);
     int32_t toSkip;
@@ -276,6 +277,7 @@ class RleDecoderV1 : public dwio::common::IntDecoder<isSigned> {
         toSkip = visitor.processNull(atEnd);
       } else {
         if (hasNulls && !allowNulls) {
+          // 这个函数会更新current值, 将current移到不为null的row
           toSkip = visitor.checkAndSkipNulls(nulls, current, atEnd);
           if (!Visitor::dense) {
             this->template skip<false>(toSkip, current, nullptr);
@@ -301,6 +303,7 @@ class RleDecoderV1 : public dwio::common::IntDecoder<isSigned> {
       }
       ++current;
       if (toSkip > 0) {
+        // 跳过的range为: [current, current + toSkip)
         this->template skip<hasNulls>(toSkip, current, nulls);
         current += toSkip;
       }

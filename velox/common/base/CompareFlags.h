@@ -30,6 +30,7 @@ struct CompareFlags {
 
   bool ascending = true;
 
+  // equalsOnly为true时, 比较时只关心是否一样, 不关心大小
   // When true, comparison should return non-0 early when sizes mismatch.
   bool equalsOnly = false;
 
@@ -109,8 +110,7 @@ struct CompareFlags {
     ///     - Comparing top level nulls also throws.
     ///
     ///   2. Arrays:
-    ///     - Only elements up to index min(rhs.size(), lhs.size()) are
-    ///     compared.
+    ///     - Only elements up to index min(rhs.size(), lhs.size()) are compared.
     ///
     ///     - Elements are compared in order starting from index 0.
     ///

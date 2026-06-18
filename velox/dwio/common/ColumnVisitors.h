@@ -344,6 +344,8 @@ class ColumnVisitor {
     if (isDense) {
       return 0;
     }
+    // 注意, 上面已经对rowIndex_进行过++操作了, 因此currentRow()对应的其实是
+    // 下次需要访问的row, 而rowAt(rowIndex_ - 1)则是当前访问的row.
     return currentRow() - rowAt(rowIndex_ - 1) - 1;
   }
 
@@ -391,6 +393,13 @@ class ColumnVisitor {
 
   void filterPassed(T value) {
     addResult(value);
+
+    // 如果当前column的filter不是AlwaysTrue, 则意味着本column会限定
+    // 父column的输出rows. 比如父column希望读取[1, 3, 5, 7, 9]这些
+    // rows, 但 行#1 和 行#3 不满足本column的filter条件. 则父column
+    // 会更新输出的rows为[5, 7, 9]. 下次读取其他columns, 只会要求读取
+    // [5, 7, 9]这些rows.
+    // 详情参见: SelectiveStructColumnReaderBase::read
     if (!std::is_same_v<TFilter, velox::common::AlwaysTrue>) {
       addOutputRow(currentRow());
     }

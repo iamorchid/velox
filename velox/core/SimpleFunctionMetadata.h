@@ -280,6 +280,8 @@ struct TypeAnalysis<ShortDecimal<P, S>> {
     const auto p = P::name();
     const auto s = S::name();
     results.out << fmt::format("decimal({},{})", p, s);
+    // 可以看到, P和S不能为整形常量, 只能为表示整形的variable, 即ShortDecimal<10, 2>是非法的.
+    // 但可以通过FunctionSignatureBuilder指定arg类型为: "decimal(10, 2)".
     results.addVariable(
         exec::SignatureVariable(
             p, std::nullopt, exec::ParameterType::kIntegerParameter));
@@ -696,6 +698,7 @@ class SimpleFunctionMetadata : public ISimpleFunctionMetadata {
     builder.returnType(analysis.outputType);
     int32_t position = 0;
     for (const auto& arg : analysis.argsTypes) {
+      // 这里的ConstantChecker是类SimpleFunctionMetadata上的一个模版参数
       if (ConstantChecker::isConstant[position++]) {
         builder.constantArgumentType(arg);
       } else {
@@ -742,6 +745,7 @@ class UDFHolder {
   using Metadata =
       core::SimpleFunctionMetadata<Fun, TReturn, ConstantChecker, TArgs...>;
 
+  // 这里的模版参数Exec, 通常对应UdfTypeResolver.h中定义的VectorExec
   template <typename T>
   using exec_resolver = typename Exec::template resolver<T>;
 
@@ -821,10 +825,13 @@ class UDFHolder {
       "Provided call() methods need to only return void, bool OR Status.");
 
   // callNullable():
+  // Notice that callNullable function takes arguments as raw pointers and 
+  // not references to allow for specifying null values. 
   static constexpr bool udf_has_callNullable_return_bool = util::has_method<
       Fun,
       callNullable_method_resolver,
       bool,
+      // 下面的模版参数都作为has_method的可变模版参数
       exec_return_type,
       const exec_arg_type<TArgs>*...>::value;
   static constexpr bool udf_has_callNullable_return_void = util::has_method<

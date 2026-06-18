@@ -38,7 +38,7 @@ DwrfData::DwrfData(
           proto::Stream_Kind_PRESENT,
           proto::orc::Stream_Kind_PRESENT),
       streamLabels.label(),
-      false);
+      false /* 允许不存在 */);
   if (stream) {
     notNullDecoder_ = createBooleanRleDecoder(std::move(stream), encodingKey);
   }
@@ -54,7 +54,7 @@ DwrfData::DwrfData(
           proto::Stream_Kind_ROW_INDEX,
           proto::orc::Stream_Kind_ROW_INDEX),
       streamLabels.label(),
-      false);
+      false /* 允许不存在 */);
 }
 
 uint64_t DwrfData::skipNulls(uint64_t numValues, bool /*nullsOnly*/) {
@@ -116,6 +116,12 @@ dwio::common::PositionProvider DwrfData::seekToRowGroup(int64_t index) {
   return positionProvider;
 }
 
+///
+/// incomingNulls可以理解为来自parent column(比如struct)的nulls. 而child column
+/// 只会处理parent nulls中bits为1的行(即不为null的行). 比如incomingNulls为[0010 1100]
+/// 且 numValues 为8, 那么child只需要读取next 3 rows的nulls情况, 并对incomingNulls中
+/// 为1的bits进行替换, 替换后的nulls作为child column的null bits.
+///
 void DwrfData::readNulls(
     vector_size_t numValues,
     const uint64_t* incomingNulls,
@@ -126,6 +132,15 @@ void DwrfData::readNulls(
     return;
   }
 
+  //
+  // 这里的numValues对应的并不是要读取的rows数量, 比如要读取的rows为[0, 10, 100, 200], 则
+  // numValues对应的值为 200+1, 即需要维护读取范围内的所有bits. child column需要从PRESENT
+  // stream读取的bits数量由incomingNulls决定, 即只需要为incomingNulls中bit为1的row读取对
+  // 应的bits, 并将这些bits scatter到incomingNulls中为1的位置来作为child column的全局nulls. 
+  // 之所以需要这么做, 是因为orc的parent column的值为null时, 它的null信息不回反馈到child
+  // column的PRESENT stream中. 有了全局nulls信息后, child column读取完row#100对应的值后, 
+  // 再读取row#200时, 就知道需要从DATA stream中跳过多少个值了 (bit为1的row才会有值).
+  //
   const auto numBytes = bits::nbytes(numValues);
   if (!nulls || nulls->capacity() < numBytes) {
     nulls = AlignedBuffer::allocate<char>(numBytes, &memoryPool_);
@@ -155,11 +170,15 @@ void DwrfData::filterRowGroups(
     uint64_t rowGroupSize,
     const dwio::common::StatsContext& writerContext,
     FilterRowGroupsResult& result) {
+  // 并不是所有的column都会定义index stream, 比如struct类型的column,
+  // 就不会定义index stream.
   if (!index_ && !indexStream_) {
     return;
   }
 
+  // 如果index_不存在, 则基于indexStream_来实例话RowIndex
   ensureRowGroupIndex();
+
   auto* filter = scanSpec.filter();
   auto* dwrfContext = reinterpret_cast<const StatsContext*>(&writerContext);
   result.totalCount = std::max(result.totalCount, index_->entry_size());

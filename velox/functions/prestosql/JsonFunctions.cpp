@@ -316,6 +316,7 @@ class JsonParseImpl {
       try {
         auto value = flatInput->valueAt(row);
         auto size = prepareInput(value, needNormalizes[row]);
+        // parse函数中会执行 views_.clear()
         if (auto error = parse(size, needNormalizes[row])) {
           if (!nullOnError) {
             context.setVeloxExceptionError(row, errors_[error]);

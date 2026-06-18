@@ -37,7 +37,7 @@ for each pipeline can be different.
 
 Driver refers to a single thread of execution of a single pipeline.
 
-Let’s look at a few examples.
+Let's look at a few examples.
 
 A query plan with a HashJoinNode is converted into two pipelines. One pipeline
 contains a HashProbe operator. Another pipeline contains a HashBuild operator.

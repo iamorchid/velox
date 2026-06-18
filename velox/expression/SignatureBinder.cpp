@@ -242,6 +242,8 @@ bool SignatureBinderBase::checkOrSetVarcharEnumParameter(
 bool SignatureBinderBase::checkOrSetIntegerParameter(
     const std::string& parameterName,
     int value) {
+  // 如果实现函数时, 参数对应的TypeSignature的variable显式指定了为整数, 
+  // 比如decimal(10, 2), 则函数输入的type的parameter也必须一致.
   if (isPositiveInteger(parameterName)) {
     return atoi(parameterName.c_str()) == value;
   }
@@ -467,6 +469,7 @@ bool SignatureBinderBase::tryBind(
   for (auto i = 0; i < params.size(); i++) {
     const auto& actualParameter = actualType->parameters()[i];
     switch (actualParameter.kind) {
+      // Type.h中的TypeParameterKind和FunctionSignature.h中的ParameterType是对应的.
       case TypeParameterKind::kLongLiteral:
         if (!checkOrSetIntegerParameter(
                 params[i].baseName(), actualParameter.longLiteral.value())) {

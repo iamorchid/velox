@@ -539,6 +539,8 @@ class MemoryPool : public std::enable_shared_from_this<MemoryPool> {
     return parent_ == nullptr;
   }
 
+  /// quantize 来自 "quantum"（量子），表示把一个连续的数值范围切成很多小段，
+  /// 每段用一个代表值来表示。
   /// Returns the next higher quantized size for the internal memory reservation
   /// propagation. Small sizes are at MB granularity, larger ones at coarser
   /// granularity.
@@ -926,6 +928,8 @@ class MemoryPoolImpl : public MemoryPool {
     if (neededSize <= 0) {
       return 0;
     }
+    // 这里会尝试reserve比请求大的空间大小(最小以MB为粒度), 即提前reverse
+    // 一定的余量, 避免后续频繁进行grow操作.
     return roundedDelta(reservationBytes_, neededSize);
   }
 

@@ -24,7 +24,7 @@ class ConstantExpr : public SpecialForm {
       : SpecialForm(
             SpecialFormKind::kConstant,
             value->type(),
-            std::vector<ExprPtr>(),
+            std::vector<ExprPtr>() /* inputs */,
             "literal",
             !value->isNullAt(0) /* supportsFlatNoNullsFastPath */,
             false /* trackCpuUsage */),

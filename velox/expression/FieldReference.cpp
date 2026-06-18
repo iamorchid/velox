@@ -79,6 +79,8 @@ void FieldReference::apply(
   if (inputs_.empty()) {
     row = context.row();
   } else {
+    // 这种情况下, field对应的是某个struct字段的subfield, inputs_[0]
+    // 对应的就是sturct字段.
     inputs_[0]->eval(rows, context, input);
     if (context.lazyDereference() && isLazyNotLoaded(*input)) {
       row = loadRowVector(*input, rows);

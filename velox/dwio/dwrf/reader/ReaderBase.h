@@ -137,6 +137,7 @@ class ReaderBase {
   const std::shared_ptr<const dwio::common::TypeWithId>& schemaWithId() const {
     if (!schemaWithId_) {
       if (options_.scanSpec()) {
+        // schema_对应orc或者dwrf文件中的schema, options_.scanSpec()指定了需要读取的column
         schemaWithId_ =
             dwio::common::TypeWithId::create(schema_, *options_.scanSpec());
       } else {

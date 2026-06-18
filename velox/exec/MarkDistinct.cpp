@@ -50,6 +50,15 @@ MarkDistinct::MarkDistinct(
     identityProjections_.emplace_back(i, i);
   }
 
+  //
+  // MarkDistinctNode::MarkDistinctNode 在构造outputType_时, 将markerName_
+  // 对应的列schema放在RowType的最后. 因此, getOutput在构建输出的RowVector时,
+  // 同样需要将distinct flag的输出放在了RowVector的最后一列. 
+  //
+  // 下游算子判断MarkDistinct算子输出的那一列对应flag时, 是通过marker名称来判断的, 
+  // 比如通过类似下面的代码 (参见AggregateInfo.cpp中 toAggregateInfo 函数):
+  // inputType->asRow().getChildIdx(mask->name())
+  //
   // Result projections: one per marker output column. The first marker is the
   // no-mask marker; additional markers correspond to each mask.
   const auto numMarkers = numMasks() + 1;
@@ -101,7 +110,12 @@ MarkDistinct::MarkDistinct(
 }
 
 void MarkDistinct::addInput(RowVectorPtr input) {
+<<<<<<< HEAD
   ensureInputFits(input);
+=======
+  // 这里每次进行addInput操作时, 内部的lookup_都会更新
+  groupingSet_->addInput(input, /*mayPushdown=*/false);
+>>>>>>> 54d5b1996 (add tmp changes)
 
   if (inputSpiller_ != nullptr) {
     spillInput(input, pool());
@@ -214,6 +228,7 @@ RowVectorPtr MarkDistinct::getOutput() {
     return nullptr;
   }
 
+<<<<<<< HEAD
   if (input_ == nullptr) {
     if (spillInputReader_ == nullptr) {
       return nullptr;
@@ -228,6 +243,20 @@ RowVectorPtr MarkDistinct::getOutput() {
     if (input_ == nullptr) {
       return nullptr;
     }
+=======
+  //
+  // 这里标记distinct时, 可以按照input进行流失输出, 因为当前的input page
+  // 只需要和之前已经收集的groups进行比较即可, 而不用关系后续的page.
+  //
+
+  auto outputSize = input_->size();
+  // Re-use memory for the ID vector if possible.
+  VectorPtr& result = results_[0];
+  if (result && result.use_count() == 1) {
+    BaseVector::prepareForReuse(result, outputSize);
+  } else {
+    result = BaseVector::create(BOOLEAN(), outputSize, operatorCtx_->pool());
+>>>>>>> 54d5b1996 (add tmp changes)
   }
 
   // Add the current input to the hash table now, just before producing output.

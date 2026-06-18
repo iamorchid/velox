@@ -150,6 +150,7 @@ constexpr inline uint64_t nwords(uint64_t bits) {
 }
 
 inline int32_t getAndClearLastSetBit(uint16_t& bits) {
+  // 统计 bits 的二进制表示末尾连续的 0 的个数
   int32_t trailingZeros = __builtin_ctz(bits);
   // erase last non-zero bit
   bits &= bits - 1;

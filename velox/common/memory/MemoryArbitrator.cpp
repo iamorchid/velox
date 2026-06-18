@@ -93,6 +93,7 @@ class NoopArbitrator : public MemoryArbitrator {
 
   void shutdown() override {}
 
+  // 只会root memory pool 才会执行这个
   void addPool(const std::shared_ptr<MemoryPool>& pool) override {
     VELOX_CHECK_EQ(pool->capacity(), 0);
     growPool(pool.get(), pool->maxCapacity(), 0);
@@ -212,6 +213,8 @@ uint64_t MemoryReclaimer::run(
   return reclaimedBytes;
 }
 
+// 对于kLeaf类型的MemoryPool, 使用的是Operator::MemoryReclaimer, 它会执行
+// op_->reclaimableBytes(...)来获取operator可回收的内存大小.
 bool MemoryReclaimer::reclaimableBytes(
     const MemoryPool& pool,
     uint64_t& reclaimableBytes) const {
@@ -259,6 +262,8 @@ uint64_t MemoryReclaimer::reclaim(
     candidates.reserve(pool->children_.size());
     nonReclaimableCandidates.reserve(pool->children_.size());
     for (auto& entry : pool->children_) {
+      // 获取child memory pool的reference. 如果不保持child的reference, 退出当前
+      // 作用域时, child可能会被析构 (此时, 也会获取parent的poolMutex_, 导致死锁).
       auto child = entry.second.lock();
       if (child != nullptr) {
         const auto reclaimableBytesOpt = child->reclaimableBytes();

@@ -374,6 +374,14 @@ size_t normalizeForJsonParse(const char* input, size_t length, char* output) {
             continue;
           }
 
+          // 
+          // json中支持直接使用Unicode字符(比如\uXXXX), 这里是解析Unicode字符并按
+          // 照UTF-8进行编码. 统一按照UTF-8编码方便字符比较、查找等, 比如\u6C49同样
+          // 表示是字符"汉", \u6C49 和 "汉"的UTF-8字节显然不一样.
+          //
+          // 注意, 对于不是Unicode的字符, velox认为它们已经按照UTF-8编码了,
+          // 而tryGetUtf8CharLengt就是获取某个字符对应的UTF-8的字节个数).
+          //
           // Otherwise write it as a single code point.
           auto increment = utf8proc_encode_char(
               codePoint, reinterpret_cast<unsigned char*>(pos));

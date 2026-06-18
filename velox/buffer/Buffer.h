@@ -131,6 +131,8 @@ class Buffer {
     return {asMutable<T>(), 0, static_cast<int32_t>(size() / sizeof(T))};
   }
 
+  // size_表示当前Buffer已经使用了多少字节, 而capacity_表示Buffer创建时分配了
+  // 多少个字节（capacity_ >= size_).
   size_t size() const noexcept {
     return size_;
   }
@@ -295,7 +297,7 @@ class Buffer {
 
   uint64_t size_{0};
   uint64_t capacity_;
-  std::atomic_int32_t referenceCount_{0};
+  std::atomic_int32_t referenceCount_{0}; // 4字节
 
   const Type type_;
 
@@ -315,6 +317,8 @@ class Buffer {
   friend class AlignedBuffer;
 };
 
+// Buffer中定义的字段对齐后, 看起来只有56个字节, 但因为Buffer存在虚函数, 因此
+// 还会额外定义一个vtable的指针字段.
 static_assert(
     sizeof(Buffer) == 64,
     "Buffer is assumed to be 64 bytes to guarantee alignment");
@@ -384,6 +388,14 @@ class AlignedBuffer : public Buffer {
       velox::memory::MemoryPool* pool,
       const std::optional<T>& initValue = std::nullopt,
       bool allocateExact = false) {
+    // 分配的内存布局 (其中, kPaddedSize的大小为: kSizeofAlignedBuffer + simd::kPadding):
+    // kSizeofAlignedBuffer: 存放Buffer结构体
+    // capacity: 存放数据
+    // preferred padding: 为了让preferredSize同2的幂次对齐，大小可能为0
+    // simd::kPadding: 看起来没有用到, 可以用来存放kEndGuard
+    // |<-------------------------------------------- preferredSize ------------------------------------------->|
+    // |<--- kSizeofAlignedBuffer --->|<------------------ capacity ------------------>|<--- simd::kPadding --->|
+    // |<--- kSizeofAlignedBuffer --->|<------ size ------>|<--- preferred padding --->|<--- simd::kPadding --->|
     size_t size = checkedMultiply(numElements, sizeof(T));
     size_t preferredSize = 0;
     if (allocateExact) {
@@ -448,20 +460,23 @@ class AlignedBuffer : public Buffer {
     }
     velox::memory::MemoryPool* pool = old->pool();
     if constexpr (!is_pod_like_v<T>) {
-      // We always take this code path for non-POD types because
-      // pool->reallocate below would move memory around without calling move
-      // constructor.
+      // We always take this code path for non-POD types because pool->reallocate 
+      // below would move memory around without calling move constructor.
+      //
       // Calling allocate<T> unnecessarily calls constructor and operator= for
       // non-POD types and can be optimized with just copy constructor. Leaving
       // it for the future.
       auto newBuffer = allocate<T>(numElements, pool, initValue);
+      // 非pod类型采用复制构造函数
       newBuffer->copyFrom(old, std::min(size, old->size()));
       // set size explicitly instead of setSize because `allocate` already
       // called the constructors
       newBuffer->size_ = size;
+      // 老的buffer析构后, 会为每个非pod item执行析构函数
       *buffer = std::move(newBuffer);
     } else if (!old->unique()) {
       auto newBuffer = allocate<T>(numElements, pool);
+      // pod类型采用memcpy进行复制
       newBuffer->copyFrom(old, std::min(size, old->size()));
       reinterpret_cast<AlignedBuffer*>(newBuffer.get())
           ->template fillNewMemory<T>(old->size(), size, initValue);
@@ -503,6 +518,7 @@ class AlignedBuffer : public Buffer {
     size_t capacity = (*buffer)->capacity();
     size_t newSize = checkedPlus(size, bytes);
     if (newSize > capacity) {
+      // reallocate中, VELOX_DCHECK会要求buffer是: AlignedBuffer<char>
       reallocate<char>(
           buffer, std::max(checkedMultiply<size_t>(2, capacity), newSize));
     }
@@ -595,6 +611,7 @@ class AlignedBuffer : public Buffer {
       VELOX_DCHECK(newBytes % sizeof(RawT) == 0);
       VELOX_DCHECK(oldBytes % sizeof(RawT) == 0);
       auto data = asMutable<RawT>();
+      // 采用iterate的方式逐个element执行复制操作
       std::fill(
           data + (oldBytes / sizeof(RawT)),
           data + (newBytes / sizeof(RawT)),

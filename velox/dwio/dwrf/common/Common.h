@@ -309,9 +309,9 @@ class DwrfStreamIdentifier : public dwio::common::StreamIdentifier {
   /// column should have similar read percentage, so it is ok for them to
   /// share the same TrackingData.
   DwrfStreamIdentifier(
-      uint32_t node,
-      uint32_t sequence,
-      uint32_t column,
+      uint32_t node, // 表示orc/dwrf column ID
+      uint32_t sequence, // 表示啥?
+      uint32_t column, // 表示啥?
       StreamKind kind,
       DwrfFormat format)
       : StreamIdentifier(
